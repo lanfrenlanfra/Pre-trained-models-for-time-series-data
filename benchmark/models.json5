@@ -1,0 +1,27 @@
+{
+    "autoreg": {
+        "transforms_params": {
+            "apply_normalization": false,
+            "apply_moving_average": false,
+            "moving_average_n_steps": 1
+        },
+        "detection_model_params": {
+            "order": 20,
+            "threshold": 3.0,
+            "model_name": "Autoregressive"
+        }
+    },
+    // put your new models here like
+    // "granite": {
+    //     "transforms_params": {
+    //         "apply_normalization": false,
+    //         "apply_moving_average": false,
+    //         "moving_average_n_steps": 1
+    //     },
+    //     "detection_model_params": {
+    //         "threshold": 3.0,
+    //         "model_name": "GraniteTS",
+    //         ...
+    //     }
+    // },
+}

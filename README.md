@@ -1,3 +1,4 @@
 - `anomaly_detection/` - скрипты для системы детекции аномалий
 - `benchmark/` - скрипты для бенчмарка 
-- Датасеты: https://disk.yandex.ru/d/xVd33nmvuR3NTw - их надо положить в `/benchmark/data`
+- Датасеты: https://disk.yandex.ru/d/xVd33nmvuR3NTw - их надо положить в `/benchmark/data` source: https://arxiv.org/pdf/2402.10802
+

@@ -1,0 +1,15 @@
+[project]
+name = "vsevolod"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "json5>=0.13.0",
+    "pandas>=2.3.3",
+    "pydantic>=2.12.5",
+    "salesforce-merlion>=2.0.2",
+    "seaborn>=0.13.2",
+    "statsmodels>=0.14.6",
+    "termcolor>=3.3.0",
+]

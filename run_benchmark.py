@@ -5,7 +5,7 @@ import pandas as pd
 
 from src.anomaly_detection_benchmark import AnomalyDetectionBenchmark
 from src.dataset import Dataset
-from src.loggers import InlineLogger, UnderdeepLogger, MLflowLogger
+from src.loggers import InlineLogger
 
 from termcolor import colored
 

@@ -6,7 +6,7 @@ from typing import Any, Dict, Optional
 
 import numpy as np
 import pandas as pd
-from anomaly_detection import AnomalyDetectionSystem, select_threshold
+from anomaly_detection import AnomalyDetectionSystem
 from merlion.evaluate.anomaly import TSADMetric
 from merlion.utils import TimeSeries
 from src.metrics import get_auc_pr, get_f1_best, get_pointwise_f1_pa
@@ -159,12 +159,9 @@ class AnomalyDetectionBenchmark:
         )
 
         anomalies_percentage = anomalies["ground_truth"].sum() / len(anomalies) * 100
-        threshold = select_threshold(anomalies_percentage, detector.detect(values_df), "knee", S=10.0)
 
         if all_at_once:
             detection_result = detector.detect(values_df)
-            if auto_threshold:
-                detection_result.is_anomaly = detection_result.anomaly_scores > threshold
             anomalies["predicted"] = detection_result.is_anomaly
             anomalies["score"] = detection_result.anomaly_scores
             return anomalies
@@ -179,8 +176,6 @@ class AnomalyDetectionBenchmark:
         for start, alert_end, history_end in generate_detection_windows(time, alert_window, history_window):
             window_data = values_df.iloc[start:history_end]
             window_detection_result = detector.detect(window_data)
-            if auto_threshold:
-                window_detection_result.is_anomaly = window_detection_result.anomaly_scores > threshold
             n_alert_events = history_end - alert_end
             predictions_anomaly.append(window_detection_result.is_anomaly[-n_alert_events:])
             predictions_score.append(window_detection_result.anomaly_scores[-n_alert_events:])

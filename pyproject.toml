@@ -13,3 +13,8 @@ dependencies = [
     "statsmodels>=0.14.6",
     "termcolor>=3.3.0",
 ]
+
+[dependency-groups]
+dev = [
+    "notebook>=7.5.3",
+]

@@ -210,16 +210,17 @@ class AnomalyDetectionBenchmark:
 
         f1_best, threshold = get_f1_best(ground_truth, score)
 
+        # убрала .value в конце метрик
         return {
-            "precision": TSADMetric.Precision.value(
+            "precision": TSADMetric.Precision(
                 ground_truth=ground_truth_ts,
                 predict=predicted_ts,
             ),
-            "recall": TSADMetric.Recall.value(
+            "recall": TSADMetric.Recall(
                 ground_truth=ground_truth_ts,
                 predict=predicted_ts,
             ),
-            "f1": TSADMetric.F1.value(
+            "f1": TSADMetric.F1(
                 ground_truth=ground_truth_ts,
                 predict=predicted_ts,
             ),

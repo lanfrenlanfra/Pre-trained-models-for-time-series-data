@@ -1,3 +1,4 @@
+import os
 import argparse
 import json5
 import logging
@@ -164,7 +165,21 @@ def main():
 
             # Append results to CSV if requested
             if args.output_csv:
-                with open(args.output_csv, 'a') as f:
+                # with open(args.output_csv, 'a') as f:
+                #     f.write(
+                #         f"{dataset_name},{config_name},{metrics.get('f1_best', '')},"
+                #         f"{metrics.get('f1_pointwise_pa_best', '')},{metrics.get('f1', '')},"
+                #         f"{metrics.get('recall', '')},{metrics.get('precision', '')},{metrics.get('auc_pr', '')}\n"
+                #     )
+                header = "dataset,model,f1_best,f1_pointwise_pa_best,f1,recall,precision,auc_pr\n"
+
+                # если файла ещё нет — записать header
+                if not os.path.exists(args.output_csv):
+                    with open(args.output_csv, "w") as f:
+                        f.write(header)
+
+                # затем дописывать строку для каждого результата
+                with open(args.output_csv, "a") as f:
                     f.write(
                         f"{dataset_name},{config_name},{metrics.get('f1_best', '')},"
                         f"{metrics.get('f1_pointwise_pa_best', '')},{metrics.get('f1', '')},"

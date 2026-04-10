@@ -9,6 +9,7 @@ from typing import Dict, List
 import numpy as np
 import pandas as pd
 
+from anomaly_detection.core import TimeSeriesWrapper
 from anomaly_detection.models.granite_ttm import GraniteTTMDetector
 
 
@@ -62,8 +63,10 @@ def evaluate_file(csv_path: Path, model_params: Dict) -> Dict:
     ts_df = df[value_cols].copy()
     ts_df.index = pd.to_datetime(df["timestamp"])
 
+    time_series = TimeSeriesWrapper(ts_df)
+
     detector = GraniteTTMDetector(**model_params)
-    result = detector(ts_df)
+    result = detector(time_series)
 
     forecast = result.expected_value
     if forecast.ndim == 1:

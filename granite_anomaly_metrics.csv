@@ -1,0 +1,6 @@
+dataset,model,f1_best,f1_pointwise_pa_best,f1,recall,precision,auc_pr
+Yahoo,autoreg,0.914,0.568,0.499,0.936,0.361,0.796
+Yahoo,autoreg,0.914,0.568,0.499,0.936,0.361,0.796
+Yahoo,autoreg,0.914,0.568,0.499,0.936,0.361,0.796
+Yahoo,autoreg,0.818,0.568,0.499,0.936,0.361,0.796
+Yahoo,granite_ttm,0.633,0.187,0.132,0.68,0.094,0.565

@@ -88,9 +88,72 @@ class GraniteTTMDetector(BaseDetector):
             model_path=self.params["hf_model_path"],
             context_length=self.params["context_length"],
             prediction_length=self.params["prediction_length"],
-            freq_prefix_tuning=True,
+            freq_prefix_tuning=False,
+            freq=None,
             prefer_l1_loss=False,
+            prefer_longer_context=True,
         )
+
+    def _extract_forecast_array(self, output):
+        """
+        Convert Granite/TSFM model output to a numpy forecast array.
+
+        Expected final shape:
+        - [pred_len] for univariate
+        - or [pred_len, channels]
+        """
+        candidate = output
+
+        # Common HF/TSFM structured outputs
+        for attr in [
+            "prediction_outputs",
+            "predictions",
+            "prediction",
+            "forecast",
+            "outputs",
+            "logits",
+        ]:
+            if hasattr(candidate, attr):
+                candidate = getattr(candidate, attr)
+                break
+
+        # Some outputs behave like dicts
+        if isinstance(candidate, dict):
+            for key in [
+                "prediction_outputs",
+                "predictions",
+                "prediction",
+                "forecast",
+                "outputs",
+                "logits",
+            ]:
+                if key in candidate:
+                    candidate = candidate[key]
+                    break
+
+        # Torch tensor -> numpy
+        if hasattr(candidate, "detach"):
+            candidate = candidate.detach().cpu().numpy()
+
+        # Final numpy conversion
+        candidate = np.asarray(candidate)
+
+        # Expected Granite shapes are usually:
+        # [B, pred_len, C] or [pred_len, C] or [pred_len]
+        if candidate.ndim == 3:
+            candidate = candidate[0]  # [pred_len, C]
+        elif candidate.ndim == 2:
+            pass  # already [pred_len, C] or [B, pred_len]
+        elif candidate.ndim == 1:
+            return candidate.astype(float)
+        else:
+            raise ValueError(f"Unexpected Granite output shape/type: {type(output)} / shape={candidate.shape}")
+
+        # Univariate: [pred_len, 1] -> [pred_len]
+        if candidate.ndim == 2 and candidate.shape[-1] == 1:
+            candidate = candidate[:, 0]
+
+        return candidate.astype(float)
 
     def _forecast_channel(self, values: np.ndarray) -> GraniteForecastResult:
         context_length = int(self.params["context_length"])
@@ -132,15 +195,14 @@ class GraniteTTMDetector(BaseDetector):
                 batch = torch.tensor(context[None, :, None], dtype=torch.float32, device=device)
 
                 output = model(batch)
-                # Granite TTM returns shape roughly [B, pred_len, C]
-                forecast = output.squeeze(0).detach().cpu().numpy()
+                forecast = self._extract_forecast_array(output)
 
                 if forecast.ndim == 2:
                     forecast = forecast[:, 0]
                 elif forecast.ndim == 1:
                     pass
                 else:
-                    raise ValueError(f"Unexpected Granite output shape: {forecast.shape}")
+                    raise ValueError(f"Unexpected Granite output shape after extraction: {forecast.shape}")
 
                 horizon = pred_end - ctx_end
                 forecast = forecast[:horizon]

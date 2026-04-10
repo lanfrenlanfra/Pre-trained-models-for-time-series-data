@@ -57,37 +57,94 @@ def compress_point_adjusted(y_true, y_score):
 
     return np.array(compressed_true), np.array(compressed_score)
 
+def get_f1_best(ground_truth, score):
+    ground_truth = np.asarray(ground_truth).astype(int)
+    score = np.asarray(score, dtype=float)
 
-def get_f1_best(y_true, y_score):
-    """Get F1 score for best threshold.
+    positive_class_scores = score[ground_truth == 1]
+    negative_class_scores = score[ground_truth == 0]
 
-    Args:
-        y_true: array-like of true values
-        y_score: array-like of predicted values
+    # Защита от пустых классов
+    if len(positive_class_scores) == 0 or len(negative_class_scores) == 0:
+        threshold = float(np.median(score)) if len(score) else 0.0
+        predicted = (score > threshold).astype(int)
+        tp = np.sum((predicted == 1) & (ground_truth == 1))
+        fp = np.sum((predicted == 1) & (ground_truth == 0))
+        fn = np.sum((predicted == 0) & (ground_truth == 1))
 
-    Returns:
-        F1 score for best threshold and best threshold
-    """
-    y_true = np.asarray(y_true)
-    y_score = np.asarray(y_score)
-    if sum(y_true) == 0:
-        return 1.0, 100.0
-    y_true_compressed, y_score_compressed = compress_point_adjusted(y_true, y_score)
-    precision, recall, thresholds = precision_recall_curve(y_true_compressed, y_score_compressed)
-    f1 = 2 * precision * recall / (precision + recall + 1e-8)
+        precision = tp / (tp + fp + 1e-8)
+        recall = tp / (tp + fn + 1e-8)
+        f1_best = 2 * precision * recall / (precision + recall + 1e-8)
+        return f1_best, threshold
 
-    thresholds = np.concatenate(
-        [thresholds, [max(y_score) + 1e-6]]
-    )  # thresholds from precision_recall_curve are missing highest value
+    highest_threshold = positive_class_scores.min()
 
-    highest_threshold = thresholds[np.argmax(f1)]
-    negative_class_scores = y_score[y_true == 0]
-    lowest_threshold = negative_class_scores[negative_class_scores < highest_threshold].max() + 1e-6
+    negatives_below = negative_class_scores[negative_class_scores < highest_threshold]
 
-    return (
-        np.max(f1),
-        lowest_threshold,
+    # Если массив пустой, берём threshold чуть ниже positive minimum
+    if len(negatives_below) == 0:
+        lowest_threshold = highest_threshold - 1e-6
+    else:
+        lowest_threshold = negatives_below.max() + 1e-6
+
+    candidate_thresholds = np.unique(
+        np.concatenate([
+            negative_class_scores,
+            positive_class_scores,
+            [lowest_threshold, highest_threshold]
+        ])
     )
+
+    best_f1 = -1.0
+    best_threshold = float(candidate_thresholds[0])
+
+    for threshold in candidate_thresholds:
+        predicted = (score > threshold).astype(int)
+
+        tp = np.sum((predicted == 1) & (ground_truth == 1))
+        fp = np.sum((predicted == 1) & (ground_truth == 0))
+        fn = np.sum((predicted == 0) & (ground_truth == 1))
+
+        precision = tp / (tp + fp + 1e-8)
+        recall = tp / (tp + fn + 1e-8)
+        f1 = 2 * precision * recall / (precision + recall + 1e-8)
+
+        if f1 > best_f1:
+            best_f1 = f1
+            best_threshold = float(threshold)
+
+    return best_f1, best_threshold
+
+# def get_f1_best(y_true, y_score):
+#     """Get F1 score for best threshold.
+#
+#     Args:
+#         y_true: array-like of true values
+#         y_score: array-like of predicted values
+#
+#     Returns:
+#         F1 score for best threshold and best threshold
+#     """
+#     y_true = np.asarray(y_true)
+#     y_score = np.asarray(y_score)
+#     if sum(y_true) == 0:
+#         return 1.0, 100.0
+#     y_true_compressed, y_score_compressed = compress_point_adjusted(y_true, y_score)
+#     precision, recall, thresholds = precision_recall_curve(y_true_compressed, y_score_compressed)
+#     f1 = 2 * precision * recall / (precision + recall + 1e-8)
+#
+#     thresholds = np.concatenate(
+#         [thresholds, [max(y_score) + 1e-6]]
+#     )  # thresholds from precision_recall_curve are missing highest value
+#
+#     highest_threshold = thresholds[np.argmax(f1)]
+#     negative_class_scores = y_score[y_true == 0]
+#     lowest_threshold = negative_class_scores[negative_class_scores < highest_threshold].max() + 1e-6
+#
+#     return (
+#         np.max(f1),
+#         lowest_threshold,
+#     )
 
 
 def get_pointwise_f1_pa(y_true, y_pred):

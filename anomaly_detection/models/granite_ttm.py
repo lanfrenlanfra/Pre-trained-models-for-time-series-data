@@ -1,0 +1,218 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
+
+import numpy as np
+import pandas as pd
+
+from ..core import TimeSeriesWrapper
+from .base import BaseDetector, ModelResult
+
+try:
+    import torch
+    from tsfm_public.toolkit.get_model import get_model
+except Exception:  # pragma: no cover
+    torch = None
+    get_model = None
+
+
+@dataclass
+class GraniteForecastResult:
+    forecast: np.ndarray
+    residuals: np.ndarray
+    scores: np.ndarray
+
+
+class GraniteTTMDetector(BaseDetector):
+    """
+    Anomaly detector based on Granite TinyTimeMixer (TTM).
+
+    Idea:
+    1. Use Granite TTM as a forecaster on rolling windows.
+    2. Compute anomaly scores as normalized forecast residuals.
+    3. Mark points as anomalous when score > threshold.
+
+    Notes:
+    - Works with univariate and multivariate series.
+    - Does not train labels; this is an unsupervised residual-based detector.
+    - For CPU-only setups this is slower than AR, but closer to how a TS foundation
+      model is commonly adapted for anomaly detection.
+    """
+
+    def get_default_params(self) -> Dict[str, Any]:
+        return {
+            "model_name": "GraniteTTM",
+            "hf_model_path": "ibm-granite/granite-timeseries-ttm-r2",
+            "context_length": 512,
+            "prediction_length": 96,
+            "threshold": 3.0,
+            "step": None,  # defaults to prediction_length
+            "device": "cpu",
+            "per_channel": True,
+            "warmup_points": None,  # defaults to context_length
+            "residual_stat_window": None,  # defaults to 10 * prediction_length
+            "min_std": 1e-6,
+            "use_absolute_error": True,
+        }
+
+    def validate_params(self, params: Dict[str, Any]) -> None:
+        if params["threshold"] < 0:
+            raise ValueError("threshold must be >= 0")
+        if params["context_length"] <= 0:
+            raise ValueError("context_length must be > 0")
+        if params["prediction_length"] <= 0:
+            raise ValueError("prediction_length must be > 0")
+        if params["device"] not in {"cpu", "cuda", "mps", "auto"}:
+            raise ValueError("device must be one of: cpu, cuda, mps, auto")
+
+    def _resolve_device(self) -> str:
+        requested = self.params["device"]
+        if requested != "auto":
+            return requested
+        if torch is None:
+            return "cpu"
+        if torch.cuda.is_available():
+            return "cuda"
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            return "mps"
+        return "cpu"
+
+    def _load_model(self):
+        if get_model is None:
+            raise ImportError(
+                "granite-tsfm is not installed. Install it with:\n"
+                'pip install "granite-tsfm>=0.3.5" "torch>=2.2" "transformers>=4.40"'
+            )
+        return get_model(
+            model_path=self.params["hf_model_path"],
+            context_length=self.params["context_length"],
+            prediction_length=self.params["prediction_length"],
+            freq_prefix_tuning=True,
+            prefer_l1_loss=False,
+        )
+
+    def _forecast_channel(self, values: np.ndarray) -> GraniteForecastResult:
+        context_length = int(self.params["context_length"])
+        prediction_length = int(self.params["prediction_length"])
+        step = int(self.params["step"] or prediction_length)
+        warmup_points = int(self.params["warmup_points"] or context_length)
+        residual_stat_window = int(
+            self.params["residual_stat_window"] or max(10 * prediction_length, prediction_length)
+        )
+        min_std = float(self.params["min_std"])
+        use_absolute_error = bool(self.params["use_absolute_error"])
+
+        n = len(values)
+        scores = np.zeros(n, dtype=float)
+        preds = np.full(n, np.nan, dtype=float)
+
+        if n <= context_length:
+            return GraniteForecastResult(
+                forecast=np.nan_to_num(preds, nan=float(np.mean(values) if n else 0.0)),
+                residuals=np.zeros(n, dtype=float),
+                scores=np.zeros(n, dtype=float),
+            )
+
+        model = self._load_model()
+        device = self._resolve_device()
+        if hasattr(model, "to"):
+            model = model.to(device)
+        if hasattr(model, "eval"):
+            model.eval()
+
+        history_residuals: List[float] = []
+
+        with torch.no_grad():
+            for start in range(0, n - context_length, step):
+                ctx_end = start + context_length
+                pred_end = min(ctx_end + prediction_length, n)
+
+                context = values[start:ctx_end].astype(np.float32)
+                batch = torch.tensor(context[None, :, None], dtype=torch.float32, device=device)
+
+                output = model(batch)
+                # Granite TTM returns shape roughly [B, pred_len, C]
+                forecast = output.squeeze(0).detach().cpu().numpy()
+
+                if forecast.ndim == 2:
+                    forecast = forecast[:, 0]
+                elif forecast.ndim == 1:
+                    pass
+                else:
+                    raise ValueError(f"Unexpected Granite output shape: {forecast.shape}")
+
+                horizon = pred_end - ctx_end
+                forecast = forecast[:horizon]
+                preds[ctx_end:pred_end] = forecast
+
+                actual = values[ctx_end:pred_end]
+                residual = actual - forecast
+                raw_err = np.abs(residual) if use_absolute_error else residual ** 2
+
+                ref = np.asarray(history_residuals[-residual_stat_window:], dtype=float)
+                scale = float(np.std(ref)) if len(ref) >= 5 else float(np.std(raw_err))
+                if not np.isfinite(scale) or scale < min_std:
+                    scale = min_std
+
+                scores[ctx_end:pred_end] = raw_err / scale
+                history_residuals.extend(raw_err.tolist())
+
+        # Fill untouched prefix using first observed valid forecast residual scale = 0
+        first_valid = np.where(~np.isnan(preds))[0]
+        if len(first_valid):
+            first_valid = int(first_valid[0])
+            preds[:first_valid] = values[:first_valid]
+        else:
+            preds[:] = values
+
+        residuals = values - preds
+        if warmup_points is not None:
+            scores[:warmup_points] = 0.0
+
+        return GraniteForecastResult(forecast=preds, residuals=residuals, scores=scores)
+
+    def _detect_univariate(self, time_series: TimeSeriesWrapper) -> ModelResult:
+        values = time_series.time_series_pd["value_0"].to_numpy(dtype=float)
+        result = self._forecast_channel(values)
+
+        threshold = float(self.params["threshold"])
+        expected = result.forecast
+        residual_std = max(float(np.std(result.residuals[np.isfinite(result.residuals)])), self.params["min_std"])
+        expected_bounds = np.column_stack(
+            [expected - threshold * residual_std, expected + threshold * residual_std]
+        )
+
+        return ModelResult(
+            anomaly_scores=result.scores.astype(float),
+            is_anomaly=(result.scores > threshold),
+            expected_value=expected.astype(float),
+            expected_bounds=expected_bounds.astype(float),
+        )
+
+    def _detect_multivariate(self, time_series: TimeSeriesWrapper) -> ModelResult:
+        df = time_series.time_series_pd
+        cols = list(df.columns)
+
+        per_channel_forecasts = []
+        per_channel_scores = []
+
+        for col in cols:
+            result = self._forecast_channel(df[col].to_numpy(dtype=float))
+            per_channel_forecasts.append(result.forecast.astype(float))
+            per_channel_scores.append(result.scores.astype(float))
+
+        forecast_matrix = np.vstack(per_channel_forecasts)  # [C, T]
+        score_matrix = np.vstack(per_channel_scores)        # [C, T]
+
+        # Aggregate multivariate anomaly score.
+        # max works better for sparse anomalies in one channel.
+        aggregated_scores = np.max(score_matrix, axis=0)
+        threshold = float(self.params["threshold"])
+
+        return ModelResult(
+            anomaly_scores=aggregated_scores.astype(float),
+            is_anomaly=(aggregated_scores > threshold),
+            expected_value=forecast_matrix.astype(float),
+            expected_bounds=None,
+        )

@@ -7,7 +7,8 @@ import numpy as np
 from . import TimeSeriesWrapper
 from ..models import (
     ARDetector,
-    ModelResult
+    GraniteTTMDetector,
+    ModelResult,
 )
 
 DEFAULT_CONFIGURATION = {
@@ -29,7 +30,8 @@ class AnomalyDetectionSystem:
     """
 
     AVAILABLE_MODELS = {
-        "Autoregressive": ARDetector
+        "Autoregressive": ARDetector,
+        "GraniteTTM": GraniteTTMDetector,
     }
 
     def __init__(

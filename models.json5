@@ -11,6 +11,27 @@
             "model_name": "Autoregressive"
         }
     },
+    "granite_ttm": {
+        "transforms_params": {
+            "apply_normalization": false,
+            "apply_moving_average": false,
+            "moving_average_n_steps": 1
+        },
+        "detection_model_params": {
+            "model_name": "GraniteTTM",
+            "hf_model_path": "ibm-granite/granite-timeseries-ttm-r2",
+            "context_length": 512,
+            "prediction_length": 96,
+            "threshold": 3.0,
+            "device": "cpu",
+            "step": 96,
+            "warmup_points": 512,
+            "residual_stat_window": 960,
+            "min_std": 1e-6,
+            "use_absolute_error": true,
+            "per_channel": true
+        }
+    },
     // put your new models here like
     // "granite": {
     //     "transforms_params": {

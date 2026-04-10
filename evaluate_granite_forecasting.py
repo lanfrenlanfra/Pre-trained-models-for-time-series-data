@@ -56,8 +56,8 @@ def read_ts(csv_path: Path) -> pd.DataFrame:
         raise ValueError(f"{csv_path}: no value_* columns")
     return df[["timestamp", *value_cols]].copy()
 
-
-def evaluate_file(csv_path: Path, model_params: Dict) -> Dict:
+def evaluate_file(csv_path: Path, detector: GraniteTTMDetector, model_params: Dict) -> Dict:
+# def evaluate_file(csv_path: Path, model_params: Dict) -> Dict:
     df = read_ts(csv_path)
     value_cols = [c for c in df.columns if c.startswith("value_")]
     ts_df = df[value_cols].copy()
@@ -65,7 +65,7 @@ def evaluate_file(csv_path: Path, model_params: Dict) -> Dict:
 
     time_series = TimeSeriesWrapper(ts_df)
 
-    detector = GraniteTTMDetector(**model_params)
+    # detector = GraniteTTMDetector(**model_params)
     result = detector(time_series)
 
     forecast = result.expected_value
@@ -121,9 +121,11 @@ def main():
         "warmup_points": args.warmup_points,
     }
 
+    detector = GraniteTTMDetector(**model_params)
+
     all_rows = []
     for csv_path in iter_csv_files(dataset_root):
-        all_rows.extend(evaluate_file(csv_path, model_params))
+        all_rows.extend(evaluate_file(csv_path, detector, model_params))
 
     df = pd.DataFrame(all_rows)
     df.to_csv(args.output_csv, index=False)

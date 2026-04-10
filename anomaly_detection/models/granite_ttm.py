@@ -79,12 +79,16 @@ class GraniteTTMDetector(BaseDetector):
         return "cpu"
 
     def _load_model(self):
+        if hasattr(self, "_model") and self._model is not None:
+            return self._model
+
         if get_model is None:
             raise ImportError(
                 "granite-tsfm is not installed. Install it with:\n"
                 'pip install "granite-tsfm>=0.3.5" "torch>=2.2" "transformers>=4.40"'
             )
-        return get_model(
+
+        model = get_model(
             model_path=self.params["hf_model_path"],
             context_length=self.params["context_length"],
             prediction_length=self.params["prediction_length"],
@@ -93,6 +97,31 @@ class GraniteTTMDetector(BaseDetector):
             prefer_l1_loss=False,
             prefer_longer_context=True,
         )
+
+        device = self._resolve_device()
+        if hasattr(model, "to"):
+            model = model.to(device)
+        if hasattr(model, "eval"):
+            model.eval()
+
+        self._model = model
+        return self._model
+
+    # def _load_model(self):
+    #     if get_model is None:
+    #         raise ImportError(
+    #             "granite-tsfm is not installed. Install it with:\n"
+    #             'pip install "granite-tsfm>=0.3.5" "torch>=2.2" "transformers>=4.40"'
+    #         )
+    #     return get_model(
+    #         model_path=self.params["hf_model_path"],
+    #         context_length=self.params["context_length"],
+    #         prediction_length=self.params["prediction_length"],
+    #         freq_prefix_tuning=False,
+    #         freq=None,
+    #         prefer_l1_loss=False,
+    #         prefer_longer_context=True,
+    #     )
 
     def _extract_forecast_array(self, output):
         """
@@ -179,10 +208,10 @@ class GraniteTTMDetector(BaseDetector):
 
         model = self._load_model()
         device = self._resolve_device()
-        if hasattr(model, "to"):
-            model = model.to(device)
-        if hasattr(model, "eval"):
-            model.eval()
+        # if hasattr(model, "to"):
+        #     model = model.to(device)
+        # if hasattr(model, "eval"):
+        #     model.eval()
 
         history_residuals: List[float] = []
 

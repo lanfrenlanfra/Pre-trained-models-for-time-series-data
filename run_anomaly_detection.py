@@ -2,7 +2,10 @@ import os
 import argparse
 import json5
 import logging
+import warnings
 import pandas as pd
+
+warnings.filterwarnings("ignore", message=".*torch_dtype.*deprecated.*", category=UserWarning)
 
 from src.anomaly_detection_benchmark import AnomalyDetectionBenchmark
 from src.dataset import Dataset

@@ -4,6 +4,8 @@ import argparse
 import json5
 import math
 import warnings
+
+warnings.filterwarnings("ignore", message=".*torch_dtype.*deprecated.*", category=UserWarning)
 from pathlib import Path
 from typing import Dict, List
 
@@ -12,9 +14,9 @@ import pandas as pd
 from termcolor import colored
 from statsmodels.tsa.ar_model import AutoReg
 
-from anomaly_detection.core import TimeSeriesWrapper
-from anomaly_detection.models.base import ModelResult
-from anomaly_detection.models.granite_ttm import GraniteTTMDetector
+from anomaly_detection_forecasting.core import TimeSeriesWrapper
+from anomaly_detection_forecasting.models.base import ModelResult
+from anomaly_detection_forecasting.models.granite_ttm import GraniteTTMDetector
 
 try:
     import torch as _torch
@@ -206,7 +208,7 @@ class ChronosRollingForecaster:
                     num_samples=self.num_samples,
                 )
 
-            samples_np = samples.squeeze(1).cpu().numpy()  # [S, pred_len]
+            samples_np = samples.squeeze(0).cpu().numpy()  # [S, pred_len]
             forecast_mean = samples_np.mean(axis=0)        # [pred_len]
             preds[ctx_end:pred_end] = forecast_mean[:horizon]
 

@@ -144,7 +144,7 @@ class ChronosDetector(BaseDetector):
                 )
 
             # samples → [num_samples, prediction_length]
-            samples_np = samples.squeeze(1).cpu().numpy()   # [S, pred_len]
+            samples_np = samples.squeeze(0).cpu().numpy()   # [S, pred_len]
             forecast_mean = samples_np.mean(axis=0)         # [pred_len]
 
             forecast = forecast_mean[:horizon]

@@ -7,6 +7,7 @@ import numpy as np
 from . import TimeSeriesWrapper
 from ..models import (
     ARDetector,
+    ChronosDetector,
     GraniteTTMDetector,
     ModelResult,
 )
@@ -31,6 +32,7 @@ class AnomalyDetectionSystem:
 
     AVAILABLE_MODELS = {
         "Autoregressive": ARDetector,
+        "Chronos": ChronosDetector,
         "GraniteTTM": GraniteTTMDetector,
     }
 

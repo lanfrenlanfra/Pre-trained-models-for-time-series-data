@@ -17,6 +17,6 @@ uv run run_anomaly_detection.py \
 uv run run_forecasting.py \
   --datasets "AIOPS, NAB, TODS, UCR, WSD, Yahoo" \
   --models models.json5 \
-  --f_time_series_metrics_csv forecasting_per_series.csv \
-  --f_output_csv forecasting_summary.csv
+  --f_output_csv forecasting_summary.csv  \
+  --f_time_series_metrics_csv forecasting_per_series.csv
 ```

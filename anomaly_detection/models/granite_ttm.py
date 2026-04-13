@@ -213,7 +213,11 @@ class GraniteTTMDetector(BaseDetector):
         # if hasattr(model, "eval"):
         #     model.eval()
 
-        history_residuals: List[float] = []
+        # ── Pass 1: run the model, store raw errors for every window ──────────
+        # We do NOT score yet – we need a global scale first.
+        # This mirrors how AR computes its scale: fit on the whole series, then
+        # derive a single σ that is consistent across the entire signal.
+        window_data: List[tuple] = []   # (ctx_end, pred_end, raw_err array)
 
         with torch.no_grad():
             for start in range(0, n - context_length, step):
@@ -241,13 +245,28 @@ class GraniteTTMDetector(BaseDetector):
                 residual = actual - forecast
                 raw_err = np.abs(residual) if use_absolute_error else residual ** 2
 
-                ref = np.asarray(history_residuals[-residual_stat_window:], dtype=float)
-                scale = float(np.std(ref)) if len(ref) >= 5 else float(np.std(raw_err))
-                if not np.isfinite(scale) or scale < min_std:
-                    scale = min_std
+                window_data.append((ctx_end, pred_end, raw_err))
 
+        # ── Pass 2: compute one global robust scale, then score ───────────────
+        # Concatenate all per-window errors collected above.
+        if window_data:
+            all_errs = np.concatenate([r for _, _, r in window_data])
+
+            # Trimmed mean: drop the top 10 % of errors (likely anomalies) so
+            # the scale is not inflated by the very points we want to detect.
+            # This gives a stable estimate of the model's *typical* error on
+            # this specific series – analogous to AR's global residual RMS.
+            if len(all_errs) >= 10:
+                trim_n = max(1, int(0.10 * len(all_errs)))
+                scale = float(np.mean(np.sort(all_errs)[:-trim_n]))
+            else:
+                scale = float(np.mean(all_errs))
+
+            if not np.isfinite(scale) or scale < min_std:
+                scale = min_std
+
+            for ctx_end, pred_end, raw_err in window_data:
                 scores[ctx_end:pred_end] = raw_err / scale
-                history_residuals.extend(raw_err.tolist())
 
         # Fill untouched prefix using first observed valid forecast residual scale = 0
         first_valid = np.where(~np.isnan(preds))[0]

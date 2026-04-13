@@ -1,0 +1,95 @@
+{
+    "autoreg": {
+        "transforms_params": {
+            "apply_normalization": false,
+            "apply_moving_average": false,
+            "moving_average_n_steps": 1
+        },
+        "detection_model_params": {
+            "order": 20,
+            "threshold": 3.0,
+            "model_name": "Autoregressive"
+        },
+        "forecasting_model_params": {
+            "order": 20,
+            "context_length": 512,
+            "prediction_length": 96,
+            "step": 96,
+            "warmup_points": 512
+        }
+    },
+    "granite_ttm": {
+        "transforms_params": {
+            "apply_normalization": false,
+            "apply_moving_average": false,
+            "moving_average_n_steps": 1
+        },
+        "detection_model_params": {
+            "model_name": "GraniteTTM",
+            "hf_model_path": "ibm-granite/granite-timeseries-ttm-r2",
+            "context_length": 512,
+            "prediction_length": 96,
+            "threshold": 3.0,
+            "device": "cpu",
+            "step": 96,
+            "warmup_points": 512,
+            "residual_stat_window": 960,
+            "min_std": 1e-6,
+            "use_absolute_error": true,
+            "per_channel": true
+        },
+        "forecasting_model_params": {
+            "hf_model_path": "ibm-granite/granite-timeseries-ttm-r2",
+            "context_length": 512,
+            "prediction_length": 96,
+            "threshold": 3.0,
+            "device": "cpu",
+            "step": 96,
+            "warmup_points": 512,
+            "min_std": 1e-6
+        }
+    },
+    "chronos": {
+        "transforms_params": {
+            "apply_normalization": false,
+            "apply_moving_average": false,
+            "moving_average_n_steps": 1
+        },
+        "detection_model_params": {
+            "model_name": "Chronos",
+            "hf_model_path": "amazon/chronos-t5-small",
+            "context_length": 512,
+            "prediction_length": 64,
+            "num_samples": 20,
+            "threshold": 3.0,
+            "device": "cpu",
+            "step": 64,
+            "warmup_points": 512,
+            "min_std": 1e-6,
+            "use_absolute_error": true,
+            "per_channel": true
+        },
+        "forecasting_model_params": {
+            "hf_model_path": "amazon/chronos-t5-small",
+            "context_length": 512,
+            "prediction_length": 64,
+            "num_samples": 20,
+            "device": "cpu",
+            "step": 64,
+            "warmup_points": 512
+        }
+    },
+    // put your new models here like
+    // "granite": {
+    //     "transforms_params": {
+    //         "apply_normalization": false,
+    //         "apply_moving_average": false,
+    //         "moving_average_n_steps": 1
+    //     },
+    //     "detection_model_params": {
+    //         "threshold": 3.0,
+    //         "model_name": "GraniteTS",
+    //         ...
+    //     }
+    // },
+}

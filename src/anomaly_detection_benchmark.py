@@ -6,7 +6,7 @@ from typing import Any, Dict, Optional
 
 import numpy as np
 import pandas as pd
-from anomaly_detection import AnomalyDetectionSystem
+from anomaly_detection_forecasting import AnomalyDetectionSystem
 from merlion.evaluate.anomaly import TSADMetric
 from merlion.utils import TimeSeries
 from src.metrics import get_auc_pr, get_f1_best, get_pointwise_f1_pa

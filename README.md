@@ -1,6 +1,8 @@
 - `anomaly_detection/` - скрипты для системы детекции аномалий
 - `benchmark/` - скрипты для бенчмарка 
 - Датасеты: https://disk.yandex.ru/d/xVd33nmvuR3NTw - их надо положить в `/benchmark/data`
+- Датасеты взяты от TimeSeriesBench https://github.com/CSTCloudOps/datasets?tab=readme-ov-file
+- Описания датасетов https://thedatumorg.github.io/TSB-AD/
 
 Запустить детекцию аномалий:
 ```bash

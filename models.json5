@@ -69,7 +69,7 @@
             "use_absolute_error": true,
             "per_channel": true,
             "batch_size": 16,
-            "max_series_length": 5000
+            "max_series_count": 2
         },
         "forecasting_model_params": {
             "hf_model_path": "amazon/chronos-t5-small",

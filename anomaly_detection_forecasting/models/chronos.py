@@ -58,7 +58,7 @@ class ChronosDetector(BaseDetector):
             "min_std": 1e-6,
             "use_absolute_error": True,
             "batch_size": 8,       # number of windows per predict() call
-            "max_series_length": 10_000,  # skip series longer than this (0 = no limit)
+            "max_series_count": 0,  # limit series per dataset (0 = no limit); handled in benchmark
         }
 
     def validate_params(self, params: Dict[str, Any]) -> None:

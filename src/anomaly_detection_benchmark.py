@@ -48,11 +48,18 @@ class AnomalyDetectionBenchmark:
         self.results = []
         self.metrics = {}
 
+        # Optional hard cap on number of series to evaluate (e.g. for slow models)
+        max_series = int(
+            self.detector_configs.get("detection_model_params", {}).get("max_series_count", 0)
+        )
+
         pbar = tqdm(
-            total=len(dataset),
+            total=min(len(dataset), max_series) if max_series > 0 else len(dataset),
             desc=f"Processing time series with {self.detector_configs['detection_model_params']['model_name']}",
         )
         for idx, item in enumerate(dataset):
+            if max_series > 0 and idx >= max_series:
+                break  # processed enough series for this model
             args = ProcessWorkerArgs(
                 idx=idx,
                 item=item,
@@ -102,31 +109,6 @@ class AnomalyDetectionBenchmark:
         n_obs = len(time_series_df)
         ts_start = pd.to_datetime(time_series_df["timestamp"].min())
         ts_end   = pd.to_datetime(time_series_df["timestamp"].max())
-
-        # ── Early-exit for Chronos max_series_length ────────────────────────
-        # When Chronos skips a series it returns all-zero scores, which would
-        # pollute summary metrics.  Detect the skip here and record NaN metrics
-        # so the series is excluded from the mean in get_stats().
-        det_params = args.detector_configs.get("detection_model_params", {})
-        model_name_cfg = det_params.get("model_name", "")
-        max_series_length = int(det_params.get("max_series_length", 0))
-        if model_name_cfg == "Chronos" and max_series_length > 0 and n_obs > max_series_length:
-            metrics = {
-                "precision": np.nan,
-                "recall": np.nan,
-                "f1": np.nan,
-                "f1_best": np.nan,
-                "f1_pointwise_pa_best": np.nan,
-                "auc_pr": np.nan,
-                "best_threshold": np.nan,
-                "skipped": True,
-                "csv_path": args.item["csv_path"],
-                "processing_time": 0.0,
-                "time_length": (ts_end - ts_start).total_seconds(),
-                "n_observations": n_obs,
-            }
-            return (args.idx, None, metrics, args.item)
-        # ────────────────────────────────────────────────────────────────────
 
         detector = AnomalyDetectionSystem(**ad_configs)
 

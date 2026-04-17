@@ -60,23 +60,26 @@
             "hf_model_path": "amazon/chronos-t5-small",
             "context_length": 512,
             "prediction_length": 64,
-            "num_samples": 20,
+            "num_samples": 5,
             "threshold": 3.0,
-            "device": "cpu",
+            "device": "mps",
             "step": 64,
             "warmup_points": 512,
             "min_std": 1e-6,
             "use_absolute_error": true,
-            "per_channel": true
+            "per_channel": true,
+            "batch_size": 16,
+            "max_series_length": 5000
         },
         "forecasting_model_params": {
             "hf_model_path": "amazon/chronos-t5-small",
             "context_length": 512,
             "prediction_length": 64,
-            "num_samples": 20,
-            "device": "cpu",
-            "step": 64,
-            "warmup_points": 512
+            "num_samples": 10,
+            "device": "mps",
+            "step": 512,
+            "warmup_points": 512,
+            "batch_size": 32
         }
     },
     // put your new models here like

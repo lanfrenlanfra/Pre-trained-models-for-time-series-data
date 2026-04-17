@@ -70,11 +70,14 @@ class AnomalyDetectionBenchmark:
 
             idx, result, metrics, item = result_data
 
-            self.results.append(result)
             series_name = f"series_{idx:03d}"
             self.metrics[series_name] = metrics
 
-            if self.logger:
+            if result is not None:
+                # Skipped series have result=None — don't add to results list
+                self.results.append(result)
+
+            if self.logger and result is not None:
                 logger_args = dict(
                     series_name=series_name,
                     metrics=metrics,
@@ -92,11 +95,44 @@ class AnomalyDetectionBenchmark:
 
     @staticmethod
     def _process_single_item_worker(args: ProcessWorkerArgs):
-        detector = AnomalyDetectionSystem(**args.detector_configs)
+        ad_configs = {k: v for k, v in args.detector_configs.items()
+                      if k != "forecasting_model_params"}
+
+        time_series_df = args.item["time_series"]
+        n_obs = len(time_series_df)
+        ts_start = pd.to_datetime(time_series_df["timestamp"].min())
+        ts_end   = pd.to_datetime(time_series_df["timestamp"].max())
+
+        # ── Early-exit for Chronos max_series_length ────────────────────────
+        # When Chronos skips a series it returns all-zero scores, which would
+        # pollute summary metrics.  Detect the skip here and record NaN metrics
+        # so the series is excluded from the mean in get_stats().
+        det_params = args.detector_configs.get("detection_model_params", {})
+        model_name_cfg = det_params.get("model_name", "")
+        max_series_length = int(det_params.get("max_series_length", 0))
+        if model_name_cfg == "Chronos" and max_series_length > 0 and n_obs > max_series_length:
+            metrics = {
+                "precision": np.nan,
+                "recall": np.nan,
+                "f1": np.nan,
+                "f1_best": np.nan,
+                "f1_pointwise_pa_best": np.nan,
+                "auc_pr": np.nan,
+                "best_threshold": np.nan,
+                "skipped": True,
+                "csv_path": args.item["csv_path"],
+                "processing_time": 0.0,
+                "time_length": (ts_end - ts_start).total_seconds(),
+                "n_observations": n_obs,
+            }
+            return (args.idx, None, metrics, args.item)
+        # ────────────────────────────────────────────────────────────────────
+
+        detector = AnomalyDetectionSystem(**ad_configs)
 
         start_time = pd.Timestamp.now()
         result = AnomalyDetectionBenchmark.process_time_series(
-            args.item["time_series"],
+            time_series_df,
             args.alert_window,
             args.history_window,
             args.all_at_once,
@@ -113,13 +149,8 @@ class AnomalyDetectionBenchmark:
         metrics = AnomalyDetectionBenchmark._calculate_single_metrics(result)
         metrics["csv_path"] = args.item["csv_path"]
         metrics["processing_time"] = processing_time
-
-        # Add time series length metrics
-        time_series = args.item["time_series"]
-        start_time = pd.to_datetime(time_series["timestamp"].min())
-        end_time = pd.to_datetime(time_series["timestamp"].max())
-        metrics["time_length"] = (end_time - start_time).total_seconds()
-        metrics["n_observations"] = len(time_series)
+        metrics["time_length"] = (ts_end - ts_start).total_seconds()
+        metrics["n_observations"] = n_obs
 
         return (args.idx, result, metrics, args.item)
 
@@ -210,19 +241,18 @@ class AnomalyDetectionBenchmark:
 
         f1_best, threshold = get_f1_best(ground_truth, score)
 
+        # TSADMetric enum is broken in Python 3.13: functools.partial becomes a
+        # descriptor, so TSADMetric.X returns the partial directly (not an enum
+        # member). In Python < 3.13 the partial lives at TSADMetric.X.value.
+        # getattr(m, 'value', m) covers both cases cleanly.
+        def _eval(metric):
+            fn = getattr(metric, 'value', metric)
+            return fn(ground_truth=ground_truth_ts, predict=predicted_ts)
+
         return {
-            "precision": TSADMetric.Precision.value(
-                ground_truth=ground_truth_ts,
-                predict=predicted_ts,
-            ),
-            "recall": TSADMetric.Recall.value(
-                ground_truth=ground_truth_ts,
-                predict=predicted_ts,
-            ),
-            "f1": TSADMetric.F1.value(
-                ground_truth=ground_truth_ts,
-                predict=predicted_ts,
-            ),
+            "precision": _eval(TSADMetric.Precision),
+            "recall":    _eval(TSADMetric.Recall),
+            "f1":        _eval(TSADMetric.F1),
             "f1_best": f1_best,
             "f1_pointwise_pa_best": get_pointwise_f1_pa(ground_truth.values, predicted.values),
             "auc_pr": get_auc_pr(ground_truth, score),
@@ -236,7 +266,27 @@ class AnomalyDetectionBenchmark:
         # Convert metrics dict to DataFrame for easier calculation
         metrics_df = pd.DataFrame.from_dict(self.metrics, orient="index")
 
+        # Exclude series that were skipped (e.g. Chronos max_series_length).
+        # Their metric columns are NaN; filtering them explicitly makes the
+        # intent clear and prevents bool 'skipped' from entering the mean.
+        if "skipped" in metrics_df.columns:
+            n_skipped = int(metrics_df["skipped"].eq(True).sum())
+            if n_skipped:
+                tqdm.write(
+                    f"  [benchmark] {n_skipped}/{len(metrics_df)} series were skipped "
+                    f"— excluded from summary metrics"
+                )
+            active_df = metrics_df[metrics_df["skipped"] != True].copy()
+        else:
+            active_df = metrics_df
+
+        if len(active_df) == 0:
+            metric_cols = ["precision", "recall", "f1", "f1_best",
+                           "f1_pointwise_pa_best", "auc_pr", "best_threshold"]
+            result = {c: np.nan for c in metric_cols}
+            return result if as_dict else pd.DataFrame([result])
+
         # Return mean of all numeric columns except csv_path, rounded to 3 decimal places
-        numeric_cols = metrics_df.select_dtypes(include=[np.number]).columns
-        stats_df = pd.DataFrame([metrics_df[numeric_cols].mean()]).round(3)
+        numeric_cols = active_df.select_dtypes(include=[np.number]).columns
+        stats_df = pd.DataFrame([active_df[numeric_cols].mean()]).round(3)
         return stats_df.iloc[0].to_dict() if as_dict else stats_df

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import math
+import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 
 from ..core import TimeSeriesWrapper
 from .base import BaseDetector, ModelResult
@@ -54,6 +57,8 @@ class ChronosDetector(BaseDetector):
             "warmup_points": None,  # defaults to context_length
             "min_std": 1e-6,
             "use_absolute_error": True,
+            "batch_size": 8,       # number of windows per predict() call
+            "max_series_length": 10_000,  # skip series longer than this (0 = no limit)
         }
 
     def validate_params(self, params: Dict[str, Any]) -> None:
@@ -91,27 +96,32 @@ class ChronosDetector(BaseDetector):
         device = self._resolve_device()
         dtype = torch.float32
 
-        pipeline = ChronosPipeline.from_pretrained(
-            self.params["hf_model_path"],
-            device_map=device,
-            torch_dtype=dtype,
-        )
+        import warnings as _w
+        with _w.catch_warnings():
+            _w.filterwarnings("ignore", message=".*torch_dtype.*")
+            pipeline = ChronosPipeline.from_pretrained(
+                self.params["hf_model_path"],
+                device_map=device,
+                dtype=dtype,
+            )
 
         self._pipeline = pipeline
         return self._pipeline
 
-    def _forecast_channel(self, values: np.ndarray) -> ChronosForecastResult:
-        context_length = int(self.params["context_length"])
+    def _forecast_channel(self, values: np.ndarray,
+                          channel_label: str = "?", file_label: str = "?") -> ChronosForecastResult:
+        context_length  = int(self.params["context_length"])
         prediction_length = int(self.params["prediction_length"])
-        step = int(self.params["step"] or prediction_length)
-        warmup_points = int(self.params["warmup_points"] or context_length)
-        num_samples = int(self.params["num_samples"])
-        min_std = float(self.params["min_std"])
+        step            = int(self.params["step"] or prediction_length)
+        warmup_points   = int(self.params["warmup_points"] or context_length)
+        num_samples     = int(self.params["num_samples"])
+        batch_size      = int(self.params.get("batch_size", 8))
+        min_std         = float(self.params["min_std"])
         use_absolute_error = bool(self.params["use_absolute_error"])
 
         n = len(values)
         scores = np.zeros(n, dtype=float)
-        preds = np.full(n, np.nan, dtype=float)
+        preds  = np.full(n, np.nan, dtype=float)
 
         if n <= context_length:
             return ChronosForecastResult(
@@ -120,41 +130,83 @@ class ChronosDetector(BaseDetector):
                 scores=np.zeros(n, dtype=float),
             )
 
+        max_len = int(self.params.get("max_series_length", 0))
+        if max_len > 0 and n > max_len:
+            tqdm.write(
+                f"  [chronos-ad] SKIP {file_label} | ch={channel_label} | "
+                f"n={n} > max_series_length={max_len} — returning neutral scores"
+            )
+            preds[:] = values  # neutral: predict actual (zero residual)
+            return ChronosForecastResult(
+                forecast=preds,
+                residuals=np.zeros(n, dtype=float),
+                scores=np.zeros(n, dtype=float),
+            )
+
         pipeline = self._load_pipeline()
 
-        # ── Pass 1: run the model, store raw errors for every window ──────────
-        window_data: List[tuple] = []  # (ctx_end, pred_end, raw_err array)
+        # Collect all window starts up-front for batching
+        starts    = list(range(0, n - context_length, step))
+        n_windows = len(starts)
+        n_batches = math.ceil(n_windows / batch_size) if starts else 0
 
-        for start in range(0, n - context_length, step):
-            ctx_end = start + context_length
-            pred_end = min(ctx_end + prediction_length, n)
-            horizon = pred_end - ctx_end
+        tqdm.write(
+            f"  [chronos-ad] {file_label} | ch={channel_label} | "
+            f"n={n}, windows={n_windows}, batches={n_batches} "
+            f"(batch_size={batch_size}, step={step})"
+        )
 
-            context = values[start:ctx_end].astype(np.float32)
+        # ── Pass 1: batched predict, store raw errors per window ──────────────
+        window_data: List[tuple] = []  # (ctx_end, pred_end, raw_err)
 
-            # Chronos expects a 1-D or 2-D tensor; shape [1, context_length]
-            context_tensor = torch.tensor(context, dtype=torch.float32).unsqueeze(0)
+        t_start = time.perf_counter()
+        for batch_i in range(n_batches):
+            batch_starts = starts[batch_i * batch_size : (batch_i + 1) * batch_size]
 
+            # Build batch tensor [B, context_length]
+            contexts = np.stack([
+                values[s : s + context_length].astype(np.float32)
+                for s in batch_starts
+            ])
+            batch_tensor = torch.tensor(contexts, dtype=torch.float32)
+
+            t0 = time.perf_counter()
             with torch.no_grad():
-                # samples shape: [num_samples, 1, prediction_length]
+                # samples shape: [B, num_samples, prediction_length]
                 samples = pipeline.predict(
-                    context_tensor,
+                    batch_tensor,
                     prediction_length,
                     num_samples=num_samples,
                 )
+            elapsed = time.perf_counter() - t0
 
-            # samples → [num_samples, prediction_length]
-            samples_np = samples.squeeze(0).cpu().numpy()   # [S, pred_len]
-            forecast_mean = samples_np.mean(axis=0)         # [pred_len]
+            remaining = (n_batches - batch_i - 1) * elapsed
+            eta = f"  ETA ~{remaining/60:.1f}min" if remaining > 0 else ""
+            tqdm.write(
+                f"  [chronos-ad]   batch {batch_i + 1}/{n_batches} "
+                f"({len(batch_starts)} windows) → {elapsed:.1f}s{eta}"
+            )
 
-            forecast = forecast_mean[:horizon]
-            preds[ctx_end:pred_end] = forecast
+            # samples: [B, num_samples, pred_len] → mean → [B, pred_len]
+            forecast_means = samples.cpu().numpy().mean(axis=1)  # [B, pred_len]
 
-            actual = values[ctx_end:pred_end]
-            residual = actual - forecast
-            raw_err = np.abs(residual) if use_absolute_error else residual ** 2
+            for local_i, start in enumerate(batch_starts):
+                ctx_end  = start + context_length
+                pred_end = min(ctx_end + prediction_length, n)
+                horizon  = pred_end - ctx_end
 
-            window_data.append((ctx_end, pred_end, raw_err))
+                forecast = forecast_means[local_i, :horizon]
+                preds[ctx_end:pred_end] = forecast
+
+                actual   = values[ctx_end:pred_end]
+                residual = actual - forecast
+                raw_err  = np.abs(residual) if use_absolute_error else residual ** 2
+                window_data.append((ctx_end, pred_end, raw_err))
+
+        tqdm.write(
+            f"  [chronos-ad] {file_label} | ch={channel_label} done "
+            f"in {time.perf_counter() - t_start:.1f}s"
+        )
 
         # ── Pass 2: global trimmed-mean scale, then score ─────────────────────
         if window_data:
@@ -188,7 +240,8 @@ class ChronosDetector(BaseDetector):
 
     def _detect_univariate(self, time_series: TimeSeriesWrapper) -> ModelResult:
         values = time_series.time_series_pd["value_0"].to_numpy(dtype=float)
-        result = self._forecast_channel(values)
+        label = getattr(time_series, "label", "?")
+        result = self._forecast_channel(values, channel_label="value_0", file_label=label)
 
         threshold = float(self.params["threshold"])
         expected = result.forecast
@@ -211,8 +264,10 @@ class ChronosDetector(BaseDetector):
         per_channel_forecasts = []
         per_channel_scores = []
 
+        label = getattr(time_series, "label", "?")
         for col in cols:
-            result = self._forecast_channel(df[col].to_numpy(dtype=float))
+            result = self._forecast_channel(df[col].to_numpy(dtype=float),
+                                            channel_label=col, file_label=label)
             per_channel_forecasts.append(result.forecast.astype(float))
             per_channel_scores.append(result.scores.astype(float))
 

@@ -3,7 +3,9 @@ from __future__ import annotations
 import argparse
 import json5
 import math
+import time
 import warnings
+from tqdm import tqdm
 
 warnings.filterwarnings("ignore", message=".*torch_dtype.*deprecated.*", category=UserWarning)
 from pathlib import Path
@@ -161,7 +163,8 @@ class ChronosRollingForecaster:
     def __init__(self, hf_model_path: str = "amazon/chronos-t5-small",
                  context_length: int = 512, prediction_length: int = 64,
                  num_samples: int = 20, step: int = None,
-                 warmup_points: int = None, device: str = "cpu", **kwargs):
+                 warmup_points: int = None, device: str = "cpu",
+                 batch_size: int = 8, **kwargs):
         self.hf_model_path = hf_model_path
         self.context_length = context_length
         self.prediction_length = prediction_length
@@ -169,6 +172,7 @@ class ChronosRollingForecaster:
         self.step = step or prediction_length
         self.warmup_points = warmup_points or context_length
         self.device = device
+        self.batch_size = batch_size
         self._pipeline = None
 
     def _load_pipeline(self):
@@ -179,53 +183,93 @@ class ChronosRollingForecaster:
                 "chronos-forecasting is not installed. Install it with:\n"
                 'pip install "chronos-forecasting>=1.3.0"'
             )
-        dtype = _torch.float32
-        self._pipeline = _ChronosPipeline.from_pretrained(
-            self.hf_model_path,
-            device_map=self.device,
-            torch_dtype=dtype,
-        )
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message=".*torch_dtype.*")
+            self._pipeline = _ChronosPipeline.from_pretrained(
+                self.hf_model_path,
+                device_map=self.device,
+                dtype=_torch.float32,
+            )
         return self._pipeline
 
-    def _forecast_channel(self, values: np.ndarray) -> np.ndarray:
+    def _forecast_channel(self, values: np.ndarray,
+                          channel_label: str = "?", file_label: str = "?") -> np.ndarray:
         n = len(values)
         preds = np.full(n, np.nan, dtype=float)
         pipeline = self._load_pipeline()
 
-        for start in range(0, n - self.context_length, self.step):
-            ctx_end = start + self.context_length
-            pred_end = min(ctx_end + self.prediction_length, n)
-            horizon = pred_end - ctx_end
+        # Collect all window start positions up front
+        starts = list(range(0, n - self.context_length, self.step))
+        n_windows = len(starts)
+        n_batches = math.ceil(n_windows / self.batch_size) if starts else 0
 
-            context = values[start:ctx_end].astype(np.float32)
-            context_tensor = _torch.tensor(context, dtype=_torch.float32).unsqueeze(0)
+        tqdm.write(
+            f"  [chronos] {file_label} | ch={channel_label} | "
+            f"n={n}, windows={n_windows}, batches={n_batches} "
+            f"(batch_size={self.batch_size}, step={self.step})"
+        )
 
+        t_channel = time.perf_counter()
+        for batch_i in range(n_batches):
+            batch_starts = starts[batch_i * self.batch_size : (batch_i + 1) * self.batch_size]
+
+            # Build batch tensor [B, context_length]
+            contexts = np.stack([
+                values[s : s + self.context_length].astype(np.float32)
+                for s in batch_starts
+            ])  # [B, ctx_len]
+            batch_tensor = _torch.tensor(contexts, dtype=_torch.float32)
+
+            t0 = time.perf_counter()
             with _torch.no_grad():
-                # samples shape: [num_samples, 1, prediction_length]
+                # samples shape: [B, num_samples, prediction_length]
                 samples = pipeline.predict(
-                    context_tensor,
+                    batch_tensor,
                     self.prediction_length,
                     num_samples=self.num_samples,
                 )
+            elapsed = time.perf_counter() - t0
 
-            samples_np = samples.squeeze(0).cpu().numpy()  # [S, pred_len]
-            forecast_mean = samples_np.mean(axis=0)        # [pred_len]
-            preds[ctx_end:pred_end] = forecast_mean[:horizon]
+            remaining = (n_batches - batch_i - 1) * elapsed
+            eta = f"  ETA ~{remaining/60:.1f}min" if remaining > 0 else ""
+            tqdm.write(
+                f"  [chronos]   batch {batch_i + 1}/{n_batches} "
+                f"({len(batch_starts)} windows) → {elapsed:.1f}s{eta}"
+            )
 
-        # Fill warmup prefix with actual values
+            # samples: [B, num_samples, pred_len] → mean over samples → [B, pred_len]
+            forecast_means = samples.cpu().numpy().mean(axis=1)  # [B, pred_len]
+
+            for local_i, start in enumerate(batch_starts):
+                ctx_end = start + self.context_length
+                pred_end = min(ctx_end + self.prediction_length, n)
+                horizon = pred_end - ctx_end
+                preds[ctx_end:pred_end] = forecast_means[local_i, :horizon]
+
+        tqdm.write(
+            f"  [chronos] {file_label} | ch={channel_label} done "
+            f"in {time.perf_counter() - t_channel:.1f}s"
+        )
+
+        # Fill warmup prefix with actual values.
+        # NaN gaps between windows (when step > prediction_length) are left as-is:
+        # evaluate_file will compute metrics only on actually-predicted points.
         first_valid_idx = np.where(~np.isnan(preds))[0]
         if len(first_valid_idx):
             preds[: first_valid_idx[0]] = values[: first_valid_idx[0]]
         else:
             preds[:] = values
+
         return preds
 
-    def __call__(self, time_series: TimeSeriesWrapper) -> ModelResult:
+    def __call__(self, time_series: TimeSeriesWrapper,
+                 file_label: str = "?") -> ModelResult:
         df = time_series.time_series_pd
         cols = list(df.columns)
 
         forecasts = [
-            self._forecast_channel(df[col].to_numpy(dtype=float))
+            self._forecast_channel(df[col].to_numpy(dtype=float),
+                                   channel_label=col, file_label=file_label)
             for col in cols
         ]
         forecast_matrix = np.vstack(forecasts)  # [C, T]
@@ -389,8 +433,10 @@ def evaluate_file(csv_path: Path, detector, model_name: str, model_params: Dict)
 
     time_series = TimeSeriesWrapper(ts_df)
 
-    # detector = GraniteTTMDetector(**model_params)
-    result = detector(time_series)
+    if isinstance(detector, ChronosRollingForecaster):
+        result = detector(time_series, file_label=csv_path.name)
+    else:
+        result = detector(time_series)
 
     forecast = normalize_forecast_array(result.expected_value)
 
@@ -401,16 +447,24 @@ def evaluate_file(csv_path: Path, detector, model_name: str, model_params: Dict)
         y_true = ts_df[col].to_numpy(dtype=float)[warmup_points:]
         y_pred = forecast[i, warmup_points:] if forecast.shape[0] > 1 else forecast[0, warmup_points:]
 
+        # Drop positions where the model produced no prediction (NaN gaps).
+        # This occurs when step > prediction_length (e.g. chronos with step=512,
+        # pred=64). Metrics are computed only on actually-predicted points so
+        # that gaps don't distort scores via fake fill values.
+        valid = ~np.isnan(y_pred)
+        y_true_eval = y_true[valid]
+        y_pred_eval = y_pred[valid]
+
         rows.append({
             "model": model_name,
             "csv_path": str(csv_path),
             "series": col,
-            "mae": mae(y_true, y_pred),
-            "rmse": rmse(y_true, y_pred),
-            "mape": mape(y_true, y_pred),
-            "smape": smape(y_true, y_pred),
-            "r2": r2(y_true, y_pred),
-            "n_eval_points": int(len(y_true)),
+            "mae": mae(y_true_eval, y_pred_eval),
+            "rmse": rmse(y_true_eval, y_pred_eval),
+            "mape": mape(y_true_eval, y_pred_eval),
+            "smape": smape(y_true_eval, y_pred_eval),
+            "r2": r2(y_true_eval, y_pred_eval),
+            "n_eval_points": int(valid.sum()),
         })
 
     return rows
@@ -463,6 +517,29 @@ def main():
         per_model_params[model_name] = mp
         detectors[model_name] = build_detector(model_name, mp)
 
+    # Pre-load model pipelines so the download/init happens before tqdm bars start
+    for model_name, detector in detectors.items():
+        if hasattr(detector, "_load_pipeline"):
+            print(f"Loading {model_name} model...", flush=True)
+            detector._load_pipeline()
+            # Warmup: trigger JIT compilation / first-inference overhead now,
+            # before tqdm bars appear, so the first real file doesn't stall at 0%.
+            if _torch is not None:
+                _ctx_len = getattr(detector, "context_length", 512)
+                _pred_len = getattr(detector, "prediction_length", 64)
+                _n_samples = getattr(detector, "num_samples", 20)
+                _dummy = _torch.zeros(1, _ctx_len, dtype=_torch.float32)
+                print(f"  Warming up {model_name} (ctx={_ctx_len}, pred={_pred_len}, samples={_n_samples})...", flush=True)
+                t0 = time.perf_counter()
+                with _torch.no_grad():
+                    detector._pipeline.predict(_dummy, _pred_len, num_samples=_n_samples)
+                print(f"  Warmup done in {time.perf_counter() - t0:.1f}s", flush=True)
+            print(f"{model_name} ready.", flush=True)
+        elif hasattr(detector, "_load_model"):
+            print(f"Loading {model_name} model...", flush=True)
+            detector._load_model()
+            print(f"{model_name} ready.", flush=True)
+
     all_rows = []
 
     for dataset_name in dataset_names:
@@ -473,13 +550,19 @@ def main():
 
         for model_name, detector in detectors.items():
             mp = per_model_params[model_name]
-            for csv_path in iter_csv_files(dataset_root):
+            csv_files = list(iter_csv_files(dataset_root))
+            pbar = tqdm(
+                csv_files,
+                desc=f"{dataset_name} | {model_name}",
+            )
+            for csv_path in pbar:
                 rows = evaluate_file(csv_path, detector, model_name, mp)
 
                 for row in rows:
                     row["dataset"] = dataset_name
 
                 all_rows.extend(rows)
+            pbar.close()
 
     df = pd.DataFrame(all_rows)
     df.to_csv(args.f_time_series_metrics_csv, index=False)

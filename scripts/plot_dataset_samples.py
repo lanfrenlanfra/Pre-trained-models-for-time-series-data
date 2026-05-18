@@ -1,25 +1,3 @@
-r"""
-Build the figure used in the thesis (section "Данные"):
-a 2x2 grid showing a representative fragment from each dataset
-(AIOPS, TODS, WSD, Yahoo) with red markers on points labelled
-as anomalies (is_anomaly == 1).
-
-How to run (from the repo root):
-
-    python scripts/plot_dataset_samples.py \
-        --data-root data \
-        --out-dir figures \
-        --copy-to "/Users/alinashekhovtsova/Downloads/Diploma/graphics"
-
-The script writes:
-    figures/dataset_examples.png   (used by coursework.tex)
-and optionally copies it into the Diploma/graphics folder so
-that pdflatex picks it up via \graphicspath{{graphics/}}.
-
-Picks one representative file per dataset (by default the file with
-the median number of anomalies). Override with --files AIOPS=...,TODS=...
-if you want specific examples.
-"""
 from __future__ import annotations
 
 import argparse

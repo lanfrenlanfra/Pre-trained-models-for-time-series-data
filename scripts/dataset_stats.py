@@ -1,20 +1,3 @@
-"""
-Print summary statistics for the datasets that live under ``data/``.
-
-Used to populate the numbers in the thesis section "Данные":
-    - number of series per dataset;
-    - min / median / max length;
-    - sampling interval (assumed equal to first timestamp delta);
-    - total number of points;
-    - global anomaly fraction;
-    - fraction of series containing at least one anomaly.
-
-For the Yahoo dataset an additional breakdown by sub-collection
-(A3Benchmark, A4Benchmark, real_*, synthetic_*) is printed.
-
-Run:
-    python scripts/dataset_stats.py --data-root data
-"""
 from __future__ import annotations
 
 import argparse

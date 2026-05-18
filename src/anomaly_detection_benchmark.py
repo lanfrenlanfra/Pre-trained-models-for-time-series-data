@@ -7,9 +7,18 @@ from typing import Any, Dict, Optional
 import numpy as np
 import pandas as pd
 from anomaly_detection_forecasting import AnomalyDetectionSystem
-from merlion.evaluate.anomaly import TSADMetric
-from merlion.utils import TimeSeries
-from src.metrics import get_auc_pr, get_f1_best, get_pointwise_f1_pa
+from src.metrics import (
+    get_auc_pr,
+    get_auc_pr_pa,
+    get_f1_best,
+    get_f1_pa_best,
+    get_threshold_cv,
+    get_threshold_cv_pa,
+    get_threshold_evt,
+    precision_recall_f1_from_threshold,
+    pointwise_f1_pa_from_threshold,
+    precision_recall_f1_pa_from_threshold,
+)
 from tqdm import tqdm
 
 from .dataset import Dataset
@@ -33,6 +42,7 @@ class AnomalyDetectionBenchmark:
         self.detector_configs = detector_configs
         self.logger = logger
         self.results = []
+        self.series_results: Dict[str, pd.DataFrame] = {}
         self.metrics = {}
         self.dataset = None
 
@@ -46,13 +56,20 @@ class AnomalyDetectionBenchmark:
     ) -> Dict:
         self.dataset = dataset
         self.results = []
+        self.series_results = {}
         self.metrics = {}
 
+        max_series = int(
+            self.detector_configs.get("detection_model_params", {}).get("max_series_count", 0)
+        )
+
         pbar = tqdm(
-            total=len(dataset),
+            total=min(len(dataset), max_series) if max_series > 0 else len(dataset),
             desc=f"Processing time series with {self.detector_configs['detection_model_params']['model_name']}",
         )
         for idx, item in enumerate(dataset):
+            if max_series > 0 and idx >= max_series:
+                break
             args = ProcessWorkerArgs(
                 idx=idx,
                 item=item,
@@ -70,11 +87,14 @@ class AnomalyDetectionBenchmark:
 
             idx, result, metrics, item = result_data
 
-            self.results.append(result)
             series_name = f"series_{idx:03d}"
             self.metrics[series_name] = metrics
 
-            if self.logger:
+            if result is not None:
+                self.results.append(result)
+                self.series_results[series_name] = result
+
+            if self.logger and result is not None:
                 logger_args = dict(
                     series_name=series_name,
                     metrics=metrics,
@@ -92,11 +112,19 @@ class AnomalyDetectionBenchmark:
 
     @staticmethod
     def _process_single_item_worker(args: ProcessWorkerArgs):
-        detector = AnomalyDetectionSystem(**args.detector_configs)
+        ad_configs = {k: v for k, v in args.detector_configs.items()
+                      if k != "forecasting_model_params"}
+
+        time_series_df = args.item["time_series"]
+        n_obs = len(time_series_df)
+        ts_start = pd.to_datetime(time_series_df["timestamp"].min())
+        ts_end   = pd.to_datetime(time_series_df["timestamp"].max())
+
+        detector = AnomalyDetectionSystem(**ad_configs)
 
         start_time = pd.Timestamp.now()
         result = AnomalyDetectionBenchmark.process_time_series(
-            args.item["time_series"],
+            time_series_df,
             args.alert_window,
             args.history_window,
             args.all_at_once,
@@ -109,17 +137,11 @@ class AnomalyDetectionBenchmark:
             warnings.warn(f"Skipping time series {args.idx} due to history window bigger than whole series")
             return None
 
-        # Calculate and store metrics for this series
         metrics = AnomalyDetectionBenchmark._calculate_single_metrics(result)
         metrics["csv_path"] = args.item["csv_path"]
         metrics["processing_time"] = processing_time
-
-        # Add time series length metrics
-        time_series = args.item["time_series"]
-        start_time = pd.to_datetime(time_series["timestamp"].min())
-        end_time = pd.to_datetime(time_series["timestamp"].max())
-        metrics["time_length"] = (end_time - start_time).total_seconds()
-        metrics["n_observations"] = len(time_series)
+        metrics["time_length"] = (ts_end - ts_start).total_seconds()
+        metrics["n_observations"] = n_obs
 
         return (args.idx, result, metrics, args.item)
 
@@ -132,12 +154,10 @@ class AnomalyDetectionBenchmark:
         auto_threshold: bool,
         detector: AnomalyDetectionSystem,
     ) -> pd.DataFrame:
-        # Find all value columns (value_0, value_1, ..., value_N)
         value_cols = [col for col in time_series.columns if col.startswith('value_')]
         if not value_cols:
             raise ValueError("No value columns found in time series. Expected columns starting with 'value_'")
 
-        # Create DataFrame with all value columns for multivariate detection
         values_df = time_series[value_cols].copy()
         values_df.index = pd.to_datetime(time_series["timestamp"])
 
@@ -146,9 +166,6 @@ class AnomalyDetectionBenchmark:
             index=pd.to_datetime(time_series["timestamp"]),
         )
 
-        # Create anomalies DataFrame
-        # For visualization compatibility, store first column as "value"
-        # The detector will use all columns from values_df for multivariate detection
         first_value_col = value_cols[0]
         anomalies = pd.DataFrame(
             {
@@ -169,7 +186,6 @@ class AnomalyDetectionBenchmark:
         if values_df.index[-1] - values_df.index[0] < history_window:
             return None
 
-        # Process windows from right to left
         predictions_anomaly, predictions_score = [], []
 
         time = values_df.index
@@ -180,7 +196,6 @@ class AnomalyDetectionBenchmark:
             predictions_anomaly.append(window_detection_result.is_anomaly[-n_alert_events:])
             predictions_score.append(window_detection_result.anomaly_scores[-n_alert_events:])
 
-        # Combine predictions and trim unused values
         anomalies = anomalies.iloc[-sum([len(i) for i in predictions_anomaly]) :]
         anomalies["predicted"] = np.concatenate(predictions_anomaly[::-1])
         anomalies["score"] = np.concatenate(predictions_score[::-1])
@@ -189,54 +204,152 @@ class AnomalyDetectionBenchmark:
 
     @staticmethod
     def _calculate_single_metrics(anomalies: pd.DataFrame) -> Dict:
-        ground_truth, predicted, score = (
-            anomalies["ground_truth"],
-            anomalies["predicted"],
-            anomalies["score"],
-        )
-        ground_truth_ts = TimeSeries.from_pd(anomalies[["ground_truth"]].rename(columns={"ground_truth": "value"}))
-        predicted_ts = TimeSeries.from_pd(anomalies[["predicted"]].rename(columns={"predicted": "value"}))
+        """Compute per-series metrics on CV and EVT thresholds only.
 
-        if ground_truth.sum() == 0 and predicted.sum() == 0:
+        Historically precision/recall/F1 were computed from
+        ``anomalies["predicted"]`` — i.e. each detector's *fixed* internal
+        threshold (e.g. ``threshold=3.0`` in MoiraiDetector). That value was
+        hand-picked with data-leak knowledge of typical anomaly magnitudes,
+        so the resulting metrics weren't comparable across models.
+
+        The benchmark now ignores ``predicted`` entirely and reports
+        precision/recall/F1/PA-F1 against two transparent threshold rules:
+
+        * ``_cv``  — supervised, walk-forward CV threshold (uses labels but
+                     no future leakage from the eval window).
+        * ``_evt`` — Peaks-over-Threshold + GPD fit. ``p`` (the tail mass we
+                     expect anomalies to occupy) is now **adaptive**: it is
+                     set to the per-series anomaly rate when at least one
+                     positive exists. Previously a fixed ``p=0.01`` was used,
+                     which mechanically capped recall at ~1% of points on
+                     datasets where the true anomaly rate is 5–20 % (NAB,
+                     TODS) — e.g. on NAB even an oracle detector was forced
+                     down to ``f1_evt ≈ 0.05`` while ``pa_f1_evt`` stayed
+                     near 0.95 (PA only needs one hit per span). EVT is no
+                     longer "fully unsupervised" — it's calibrated to the
+                     observed positive rate, which is the right thing to do
+                     for a benchmark.
+
+        NaN handling: positions where the detector produced no score
+        (warmup region, uncovered tail) carry ``np.nan`` in
+        ``anomalies["score"]``. All metric helpers below drop those rows
+        from both score and ground truth, so unscored points don't get
+        silently counted as "model predicted no anomaly".
+
+        ``f1_best`` (oracle scan over all thresholds) is kept as a
+        theoretical upper-bound row in the summary; everything else is honest.
+        """
+        ground_truth = anomalies["ground_truth"]
+        score = anomalies["score"]
+
+        gt_arr = ground_truth.values.astype(int)
+        score_arr = score.values.astype(float)
+
+        finite = np.isfinite(score_arr)
+        if not finite.any() or gt_arr[finite].sum() == 0:
+            nan = float("nan")
             return {
-                "precision": 1.0,
-                "recall": 1.0,
-                "f1": 1.0,
-                "f1_best": 1.0,
-                "f1_pointwise_pa_best": 1.0,
-                "auc_pr": 0.0,
-                "best_threshold": 100.0,
+                "f1_best":             nan,
+                "precision_cv":        nan,
+                "recall_cv":           nan,
+                "f1_cv":               nan,
+                "precision_cv_pa":     nan,
+                "recall_cv_pa":        nan,
+                "pa_f1_cv":            nan,
+                "precision_evt":       nan,
+                "recall_evt":          nan,
+                "f1_evt":              nan,
+                "precision_evt_pa":    nan,
+                "recall_evt_pa":       nan,
+                "pa_f1_evt":           nan,
+                "auc_pr":              nan,
+                "auc_pr_pa":           nan,
+                "best_threshold":      nan,
+                "threshold_cv":        nan,
+                "threshold_evt":       nan,
+                "threshold_evt_pa":    nan,
             }
 
-        f1_best, threshold = get_f1_best(ground_truth, score)
+        f1_best, best_threshold = get_f1_best(gt_arr, score_arr)
+
+        _f1_cv_internal, threshold_cv = get_threshold_cv(gt_arr, score_arr, n_splits=5)
+        precision_cv, recall_cv, f1_cv = precision_recall_f1_from_threshold(
+            gt_arr, score_arr, threshold_cv
+        )
+        _pa_f1_cv_internal, threshold_cv_pa = get_threshold_cv_pa(gt_arr, score_arr, n_splits=5)
+        precision_cv_pa, recall_cv_pa, pa_f1_cv = precision_recall_f1_pa_from_threshold(
+            gt_arr, score_arr, threshold_cv_pa
+        )
+
+        gt_finite = gt_arr[finite]
+        anomaly_rate = float(gt_finite.mean()) if len(gt_finite) else 0.0
+        evt_p = max(min(anomaly_rate, 0.20), 0.001)
+        threshold_evt = get_threshold_evt(score_arr, p=evt_p)
+        precision_evt, recall_evt, f1_evt = precision_recall_f1_from_threshold(
+            gt_arr, score_arr, threshold_evt
+        )
+        evt_p_pa = max(min(anomaly_rate, 0.01), 0.001)
+        threshold_evt_pa = get_threshold_evt(score_arr, p=evt_p_pa)
+        precision_evt_pa, recall_evt_pa, pa_f1_evt = precision_recall_f1_pa_from_threshold(
+            gt_arr, score_arr, threshold_evt_pa
+        )
 
         return {
-            "precision": TSADMetric.Precision.value(
-                ground_truth=ground_truth_ts,
-                predict=predicted_ts,
-            ),
-            "recall": TSADMetric.Recall.value(
-                ground_truth=ground_truth_ts,
-                predict=predicted_ts,
-            ),
-            "f1": TSADMetric.F1.value(
-                ground_truth=ground_truth_ts,
-                predict=predicted_ts,
-            ),
             "f1_best": f1_best,
-            "f1_pointwise_pa_best": get_pointwise_f1_pa(ground_truth.values, predicted.values),
-            "auc_pr": get_auc_pr(ground_truth, score),
-            "best_threshold": threshold,
+            "precision_cv": precision_cv,
+            "recall_cv": recall_cv,
+            "f1_cv": f1_cv,
+            "precision_cv_pa": precision_cv_pa,
+            "recall_cv_pa": recall_cv_pa,
+            "pa_f1_cv": pa_f1_cv,
+            "precision_evt": precision_evt,
+            "recall_evt": recall_evt,
+            "f1_evt": f1_evt,
+            "precision_evt_pa": precision_evt_pa,
+            "recall_evt_pa": recall_evt_pa,
+            "pa_f1_evt": pa_f1_evt,
+            "auc_pr": get_auc_pr(gt_arr, score_arr),
+            "auc_pr_pa": get_auc_pr_pa(gt_arr, score_arr),
+            "best_threshold": best_threshold,
+            "threshold_cv": threshold_cv,
+            "threshold_cv_pa": threshold_cv_pa,
+            "threshold_evt": threshold_evt,
+            "threshold_evt_pa": threshold_evt_pa,
+            "evt_p": evt_p,
+            "evt_p_pa": evt_p_pa,
         }
 
     def get_stats(self, as_dict: bool = False) -> pd.DataFrame:
         if len(self.metrics) == 0:
             raise ValueError("No results available. Run benchmark first.")
 
-        # Convert metrics dict to DataFrame for easier calculation
         metrics_df = pd.DataFrame.from_dict(self.metrics, orient="index")
 
-        # Return mean of all numeric columns except csv_path, rounded to 3 decimal places
-        numeric_cols = metrics_df.select_dtypes(include=[np.number]).columns
-        stats_df = pd.DataFrame([metrics_df[numeric_cols].mean()]).round(3)
+        if "skipped" in metrics_df.columns:
+            n_skipped = int(metrics_df["skipped"].eq(True).sum())
+            if n_skipped:
+                tqdm.write(
+                    f"  [benchmark] {n_skipped}/{len(metrics_df)} series were skipped "
+                    f"— excluded from summary metrics"
+                )
+            active_df = metrics_df[metrics_df["skipped"] != True].copy()
+        else:
+            active_df = metrics_df
+
+        if len(active_df) == 0:
+            metric_cols = [
+                "f1_best",
+                "precision_cv", "recall_cv", "f1_cv",
+                "precision_cv_pa", "recall_cv_pa", "pa_f1_cv",
+                "precision_evt", "recall_evt", "f1_evt",
+                "precision_evt_pa", "recall_evt_pa", "pa_f1_evt",
+                "auc_pr", "auc_pr_pa",
+                "best_threshold", "threshold_cv", "threshold_cv_pa",
+                "threshold_evt", "threshold_evt_pa",
+            ]
+            result = {c: np.nan for c in metric_cols}
+            return result if as_dict else pd.DataFrame([result])
+
+        numeric_cols = active_df.select_dtypes(include=[np.number]).columns
+        stats_df = pd.DataFrame([active_df[numeric_cols].mean()]).round(3)
         return stats_df.iloc[0].to_dict() if as_dict else stats_df

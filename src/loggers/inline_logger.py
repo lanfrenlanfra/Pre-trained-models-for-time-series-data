@@ -17,7 +17,6 @@ class InlineLogger(BaseLogger):
         self.clear_screen_opt = clear_screen
 
     def clear_screen(self):
-        # Cross-platform clear screen
         if sys.platform.startswith('win'):
             os.system('cls')
         else:

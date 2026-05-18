@@ -7,7 +7,6 @@ class Dataset:
     def __init__(self, path: str | Path):
         if isinstance(path, str):
             path = Path(path)
-        # print(str(path) + "**/*.csv")
         self.datafiles = glob.glob(str(path / "**" / "*.csv"), recursive=True)
 
     def __getitem__(self, index: int) -> dict[str, pd.DataFrame]:

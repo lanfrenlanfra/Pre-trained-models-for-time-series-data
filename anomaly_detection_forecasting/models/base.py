@@ -118,6 +118,102 @@ class BaseDetector(ABC):
         else:
             return self._detect_univariate(time_series)
 
+    def threshold_outputs(
+        self,
+        scores: np.ndarray,
+        expected: "np.ndarray | None" = None,
+        residual_std: "float | None" = None,
+    ) -> tuple:
+        """Compute ``(is_anomaly, expected_bounds)`` from anomaly scores using
+        the optional ``threshold`` param.
+
+        Background: precision/recall/F1 reported in the benchmark are computed
+        directly from the score column using CV- and EVT-calibrated thresholds
+        (see ``AnomalyDetectionBenchmark._calculate_single_metrics``). The
+        per-detector fixed ``threshold`` value is therefore not used for any
+        metric and has been retired as a required configuration key.
+
+        Behaviour:
+        - If ``self.params["threshold"]`` is ``None`` (the new default for all
+          detectors), returns ``(zeros[bool], None)`` — placeholder values that
+          satisfy ``ModelResult`` validation without leaking a hand-picked
+          threshold into the pipeline.
+        - If ``threshold`` is set to a number (legacy / debugging), the old
+          behaviour is preserved: ``is_anomaly = scores > threshold`` and
+          ``expected_bounds = expected ± threshold * residual_std`` (when both
+          ``expected`` and ``residual_std`` are provided).
+        """
+        threshold_param = self.params.get("threshold")
+        if threshold_param is None:
+            return np.zeros(len(scores), dtype=bool), None
+
+        threshold = float(threshold_param)
+        is_anomaly = (scores > threshold)
+
+        if expected is not None and residual_std is not None:
+            bounds = np.column_stack(
+                [
+                    expected - threshold * residual_std,
+                    expected + threshold * residual_std,
+                ]
+            ).astype(float)
+            return is_anomaly, bounds
+
+        return is_anomaly, None
+
+    @staticmethod
+    def clean_context(values: np.ndarray, mad_threshold: float = 3.0) -> np.ndarray:
+        """Replace outliers in a context window with a rolling-median baseline.
+
+        Problem this solves
+        -------------------
+        Forecasting-based detectors use a sliding context window to predict the
+        next ``prediction_length`` steps.  When the context already contains an
+        anomaly (e.g. the series has a level-shift or spike inside the window),
+        the model *adapts* to the anomalous level and predicts it as the new
+        normal — so actual values in the prediction zone produce low residuals
+        even when they remain anomalous.  This is the dominant reason why neural
+        networks can be outperformed by in-sample AR, which never has this
+        "context contamination" problem.
+
+        Solution
+        --------
+        Before passing a context to the model, detect and replace outlier values
+        using a rolling median + MAD (Median Absolute Deviation) filter.  The
+        cleaned context makes the model forecast the *normal* baseline, so
+        actual anomalous values produce high residuals regardless of whether the
+        anomaly started inside or outside the current prediction window.
+
+        Parameters
+        ----------
+        values        : 1-D context window values (length = context_length)
+        mad_threshold : outlier cutoff in MAD units (default 3.0 ≈ 99.7 % for
+                        Gaussian; lower ⇒ more aggressive cleaning)
+
+        Returns
+        -------
+        cleaned : copy of ``values`` with outlier positions replaced by the
+                  rolling-median baseline; unchanged if MAD ≈ 0 (flat signal).
+        """
+        n = len(values)
+        if n < 5:
+            return values.copy()
+
+        from scipy.signal import medfilt
+        w = max(5, min(51, n // 10))
+        w = w if w % 2 == 1 else w + 1
+        baseline = medfilt(values.astype(float), kernel_size=w)
+
+        diff = np.abs(values - baseline)
+        mad  = float(np.median(diff))
+        if mad < 1e-8:
+            return values.copy()   # flat / near-constant signal — nothing to do
+
+        cleaned = values.copy()
+        outliers = diff > mad_threshold * mad * 1.4826  # 1.4826 = 1/Φ^{-1}(0.75)
+        cleaned[outliers] = baseline[outliers]
+        return cleaned
+
     def calculate_std(self, residual: np.array) -> float:
         """
         Calculate the standard deviation of the residuals.

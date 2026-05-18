@@ -14,13 +14,13 @@ class ARDetector(BaseDetector):
     """
 
     def get_default_params(self) -> Dict[str, Any]:
-        return {"order": 20, "threshold": 3.0, "stable": True, "stable_sensitivity": 1.0}
+        return {"order": 20, "threshold": None, "stable": True, "stable_sensitivity": 1.0}
 
     def validate_params(self, params: Dict[str, Any]) -> None:
         if params["order"] <= 0:
             raise ValueError("Autoregression order must be > 0")
-        if params["threshold"] < 0:
-            raise ValueError("threshold must be not less than 0")
+        if params.get("threshold") is not None and params["threshold"] < 0:
+            raise ValueError("threshold must be >= 0 (or None to disable)")
 
     def _check_insufficient_samples(self, time_series: TimeSeriesWrapper, order: int) -> bool:
         """
@@ -50,44 +50,55 @@ class ARDetector(BaseDetector):
         n_samples = time_series.time_series_pd.shape[0]
         z_scores = np.zeros(n_samples)
         expected_value = np.array(time_series.time_series_pd["value_0"])
-        expected_bounds = np.column_stack(
-            (
-                expected_value - self.params["threshold"],
-                expected_value + self.params["threshold"],
-            )
+        is_anomaly, expected_bounds = self.threshold_outputs(
+            z_scores, expected=expected_value, residual_std=1.0,
         )
         return ModelResult(
             anomaly_scores=z_scores,
-            is_anomaly=(z_scores > self.params["threshold"]),
+            is_anomaly=is_anomaly,
             expected_value=expected_value,
             expected_bounds=expected_bounds,
         )
 
     def _detect_univariate(self, time_series: TimeSeriesWrapper) -> ModelResult:
         order = self.params["order"]
+        values = time_series.values
+        n = len(values)
 
         if self._check_insufficient_samples(time_series, order):
             return self._get_fallback_result_univariate(time_series)
 
-        model = AutoReg(time_series.time_series_pd["value_0"], lags=order)
+        train_n = min(512, max(order * 4, n // 2))
+        if train_n >= n - order:
+            train_n = order * 4
+
+        model = AutoReg(values[:train_n], lags=order)
         model_fit = model.fit()
+        params = model_fit.params
 
-        expected = np.concatenate((time_series.values[:order], model_fit.fittedvalues))
-        residuals = time_series.values - expected
-        residual_std = self.calculate_std(residuals)
+        expected = np.empty(n, dtype=float)
+        expected[:order] = values[:order]
+        expected[order:train_n] = np.asarray(model_fit.fittedvalues)
 
-        residuals = expected - time_series.values
-        z_scores = np.abs(residuals / residual_std)
-        expected_bounds = np.column_stack(
-            (
-                expected - residual_std * self.params["threshold"],
-                expected + residual_std * self.params["threshold"],
-            )
+        for t in range(train_n, n):
+            ctx = values[t - order : t][::-1]
+            expected[t] = params[0] + np.dot(params[1:], ctx)
+
+        oos_residuals = values[train_n:] - expected[train_n:]
+        residual_std = max(self.calculate_std(oos_residuals), 1e-6)
+
+        z_scores = np.full(n, np.nan, dtype=float)
+        z_scores[train_n:] = np.abs(oos_residuals) / residual_std
+
+        is_anomaly, expected_bounds = self.threshold_outputs(
+            np.nan_to_num(z_scores, nan=0.0),
+            expected=expected,
+            residual_std=residual_std,
         )
 
         return ModelResult(
             anomaly_scores=z_scores,
-            is_anomaly=(z_scores > self.params["threshold"]),
+            is_anomaly=is_anomaly,
             expected_value=expected,
             expected_bounds=expected_bounds,
         )

@@ -7,7 +7,6 @@
         },
         "detection_model_params": {
             "order": 20,
-            "threshold": 3.0,
             "model_name": "Autoregressive"
         },
         "forecasting_model_params": {
@@ -29,7 +28,6 @@
             "hf_model_path": "ibm-granite/granite-timeseries-ttm-r2",
             "context_length": 512,
             "prediction_length": 96,
-            "threshold": 3.0,
             "device": "cpu",
             "step": 96,
             "warmup_points": 512,
@@ -57,22 +55,19 @@
         },
         "detection_model_params": {
             "model_name": "Chronos",
-            "hf_model_path": "amazon/chronos-t5-small",
+            "hf_model_path": "amazon/chronos-bolt-small",
             "context_length": 512,
             "prediction_length": 64,
-            "num_samples": 5,
-            "threshold": 3.0,
             "device": "mps",
             "step": 64,
             "warmup_points": 512,
             "min_std": 1e-6,
             "use_absolute_error": true,
             "per_channel": true,
-            "batch_size": 16,
-            "max_series_count": 2
+            "batch_size": 16
         },
         "forecasting_model_params": {
-            "hf_model_path": "amazon/chronos-t5-small",
+            "hf_model_path": "amazon/chronos-bolt-small",
             "context_length": 512,
             "prediction_length": 64,
             "num_samples": 10,
@@ -82,17 +77,61 @@
             "batch_size": 32
         }
     },
-    // put your new models here like
-    // "granite": {
-    //     "transforms_params": {
-    //         "apply_normalization": false,
-    //         "apply_moving_average": false,
-    //         "moving_average_n_steps": 1
-    //     },
-    //     "detection_model_params": {
-    //         "threshold": 3.0,
-    //         "model_name": "GraniteTS",
-    //         ...
-    //     }
-    // },
+    "timesfm": {
+        "transforms_params": {
+            "apply_normalization": false,
+            "apply_moving_average": false,
+            "moving_average_n_steps": 1
+        },
+        "detection_model_params": {
+            "model_name": "TimesFM",
+            "hf_model_path": "google/timesfm-1.0-200m-pytorch",
+            "context_length": 512,
+            "prediction_length": 96,
+            "device": "mps",
+            "step": 96,
+            "warmup_points": 512,
+            "min_std": 1e-6,
+            "batch_size": 64,
+            "max_series_count": 0
+        },
+        "forecasting_model_params": {
+            "hf_model_path": "google/timesfm-1.0-200m-pytorch",
+            "context_length": 512,
+            "prediction_length": 96,
+            "device": "mps",
+            "step": 96,
+            "warmup_points": 512,
+            "min_std": 1e-6,
+            "batch_size": 64,
+            "max_series_count": 0
+        }
+    },
+    "patch_tst": {
+        "transforms_params": {
+            "apply_normalization": false,
+            "apply_moving_average": false,
+            "moving_average_n_steps": 1
+        },
+        "detection_model_params": {
+            "model_name": "PatchTST",
+            "hf_model_path": "ibm-granite/granite-timeseries-patchtst",
+            "context_length": 512,
+            "prediction_length": 96,
+            "step": 96,
+            "warmup_points": 512,
+            "min_std": 1e-6,
+            "use_absolute_error": true,
+            "device": "auto"
+        },
+        "forecasting_model_params": {
+            "hf_model_path": "ibm-granite/granite-timeseries-patchtst",
+            "context_length": 512,
+            "prediction_length": 96,
+            "step": 96,
+            "warmup_points": 512,
+            "min_std": 1e-6,
+            "device": "auto"
+        }
+    },
 }

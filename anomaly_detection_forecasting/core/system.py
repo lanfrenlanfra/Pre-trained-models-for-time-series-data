@@ -9,11 +9,13 @@ from ..models import (
     ARDetector,
     ChronosDetector,
     GraniteTTMDetector,
+    PatchTSTDetector,
+    TimesFMDetector,
     ModelResult,
 )
 
 DEFAULT_CONFIGURATION = {
-    "detection_model_params": {"model_name": "Autoregressive", "order": 20, "threshold": 3.0, "stable": False},
+    "detection_model_params": {"model_name": "Autoregressive", "order": 20, "stable": False},
 }
 
 
@@ -34,6 +36,8 @@ class AnomalyDetectionSystem:
         "Autoregressive": ARDetector,
         "Chronos": ChronosDetector,
         "GraniteTTM": GraniteTTMDetector,
+        "PatchTST": PatchTSTDetector,
+        "TimesFM": TimesFMDetector,
     }
 
     def __init__(
@@ -69,9 +73,6 @@ class AnomalyDetectionSystem:
             "detection_model_params": detection_model_params,
             "transforms_params": transforms_params,
         }
-
-        if "threshold" not in self.detection_model_params:
-            raise ValueError("You should specify threshold in detection_model_params")
 
         if "model_name" not in self.detection_model_params:
             raise ValueError("You should specify model_name in detection_model_params")
@@ -129,9 +130,15 @@ class AnomalyDetectionSystem:
         )
         expected_value, expected_bounds = self._interpolate_expected_values(detection_result, time_series, processed_ts)
 
+        threshold = self.detection_model_params.get("threshold")
+        if threshold is None:
+            is_anomaly = np.zeros(len(anomaly_scores), dtype=bool)
+        else:
+            is_anomaly = (anomaly_scores > float(threshold))
+
         result = DetectionResult(
             anomaly_scores=anomaly_scores,
-            is_anomaly=(anomaly_scores > self.detection_model_params["threshold"]),
+            is_anomaly=is_anomaly,
             expected_value=expected_value,
             expected_bounds=expected_bounds,
             metadata={},

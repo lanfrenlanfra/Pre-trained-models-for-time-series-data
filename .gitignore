@@ -107,6 +107,10 @@ input/
 saved/
 wandb/
 
+# generated plots and archived artifacts (хранятся в GitHub Releases)
+plots/
+*.tar.gz
+
 # editor, os cache directory
 .vscode/
 .idea/

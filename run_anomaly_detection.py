@@ -35,10 +35,6 @@ def save_series_plot(
     save_path: Path,
     threshold_label: str = "oracle",
 ):
-    """Draw and save a two-panel anomaly detection plot for one series.
-    ``predicted`` is always recomputed from ``score`` and ``threshold`` so
-    that oracle / CV / EVT plots are all self-consistent.
-    """
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -133,9 +129,6 @@ def save_series_plot(
     plt.close(fig)
 
 def value_to_color(val):
-    """
-    Convert value to colored text for terminal output.
-    """
     try:
         v = float(val)
     except Exception:
@@ -183,14 +176,7 @@ def print_colored_table(df, title):
             line += cval + " " * pad + "  "
         print(line)
 
-
 def print_time_table(df, title):
-    """Print a plain (uncoloured) table of minute durations.
-    ``print_colored_table`` clamps values to [0, 1] which makes any time > 1
-    show as the same "green/bold" — useless for durations. This printer just
-    formats each cell as ``{value:.2f}`` minutes (or ``-`` for NaN/missing)
-    and shows totals as a normal column.
-    """
     print(f"\n=== {title} ===")
 
     def fmt(v):
@@ -237,7 +223,7 @@ def main():
         '--logger',
         type=str,
         default='inline',
-        choices=['inline', 'underdeep', 'mlflow'],
+        choices=['inline'],
         help='Logger to use (default: inline)',
     )
     parser.add_argument('--windowed', dest='all_at_once', action='store_false', help='Process series in windows')
@@ -302,21 +288,7 @@ def main():
     for dataset_name in datasets:
         dataset = Dataset(f'data/{dataset_name}/')
         for config_name, configuration in configurations.items():
-            if args.logger == 'inline':
-                logger = InlineLogger(backend=None)
-            elif args.logger == 'mlflow':
-                logger = MLflowLogger(
-                    experiment_name=dataset_name.lower().replace('/', '-'),
-                    run_name=config_name,
-                    detector_config=configuration,
-                )
-            else:
-                logger = UnderdeepLogger(
-                    project_code="test-kek",
-                    experiment_code=dataset_name.lower().replace('/', '-'),
-                    run_name=config_name,
-                    detector_config=configuration,
-                )
+            logger = InlineLogger(backend=None)
             benchmark = AnomalyDetectionBenchmark(
                 detector_configs=configuration,
                 logger=logger,
@@ -424,7 +396,6 @@ def main():
         df_new = pd.concat(time_series_metrics, axis=0)
         write_header = not os.path.exists(args.ad_time_series_metrics_csv)
         df_new.to_csv(args.ad_time_series_metrics_csv, mode="a", header=write_header, index=False)
-
 
 if __name__ == "__main__":
     setup_logging()

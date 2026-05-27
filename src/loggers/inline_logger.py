@@ -9,7 +9,6 @@ from src.grapher import plot_time_series
 from .base_logger import BaseLogger
 from termcolor import colored
 
-
 class InlineLogger(BaseLogger):
     def __init__(self, backend: str = 'plotly', clear_screen: bool = True, **kwargs):
         self.backend = backend
@@ -25,7 +24,6 @@ class InlineLogger(BaseLogger):
     def log_single_series_metrics(
         self, series_name: str, metrics: Dict, anomalies: pd.DataFrame, csv_path: str, **kwargs
     ):
-        """Log metrics and artifacts for a single time series to stdout."""
 
         if self.clear_screen_opt:
             self.clear_screen()

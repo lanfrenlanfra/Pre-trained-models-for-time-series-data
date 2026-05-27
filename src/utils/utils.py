@@ -1,7 +1,6 @@
 import pandas as pd
 from datetime import timedelta
 
-
 def generate_detection_windows(time: pd.DatetimeIndex, alert_window: timedelta, history_window: timedelta):
     start_time = time[-1] - history_window
     history_end = len(time)

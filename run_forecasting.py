@@ -23,7 +23,7 @@ from anomaly_detection_forecasting.models.granite_ttm import GraniteTTMDetector
 
 try:
     import torch as _torch
-    from chronos import BaseChronosPipeline as _ChronosPipeline  # auto-routes to ChronosPipeline (T5) or ChronosBoltPipeline
+    from chronos import BaseChronosPipeline as _ChronosPipeline                                                              
     from chronos import ChronosBoltPipeline as _ChronosBoltPipeline
 except Exception:
     _torch = None
@@ -41,7 +41,6 @@ except Exception:
     _PatchTSTForPrediction = None
 
 def _squeeze_forecast(forecast_tensor) -> np.ndarray:
-    """Accept [B, 1, pred_len] or [B, pred_len] and return numpy [B, pred_len]."""
     arr = forecast_tensor.detach().cpu().numpy()
     if arr.ndim == 3:
         arr = arr.squeeze(1)
@@ -73,18 +72,12 @@ def r2(y_true, y_pred):
     return 1.0 - ss_res / ss_tot
 
 def wape(y_true, y_pred):
-    """Weighted Absolute Percentage Error = Σ|e| / Σ|y| × 100.
-    Aggregates MAPE properly; robust when individual y values are near 0."""
     total = float(np.sum(np.abs(y_true)))
     if total < 1e-8:
         return float("nan")
     return float(np.sum(np.abs(y_true - y_pred)) / total * 100.0)
 
 def mase(y_true, y_pred, seasonality: int = 1):
-    """Mean Absolute Scaled Error.
-    Scale = MAE of the naive seasonal baseline (lag-s random walk) on y_true.
-    MASE < 1 means the model beats the naive baseline; scale-free and stable
-    even when y contains zeros — critical for error-rate / throughput series."""
     n = len(y_true)
     if n <= seasonality:
         return float("nan")
@@ -95,20 +88,12 @@ def mase(y_true, y_pred, seasonality: int = 1):
     return float(np.mean(np.abs(y_true - y_pred)) / scale)
 
 def max_ae(y_true, y_pred):
-    """Max Absolute Error — worst single-point deviation.
-    Essential for SLA compliance monitoring: a 99th-percentile tail spike
-    that RMSE smooths out may still breach an SLA threshold."""
     return float(np.max(np.abs(y_true - y_pred)))
 
 def bias_metric(y_true, y_pred):
-    """Mean Signed Error = mean(ŷ - y).
-    Positive → model systematically over-forecasts (capacity over-provisioning risk).
-    Negative → model systematically under-forecasts (capacity under-provisioning risk)."""
     return float(np.mean(y_pred - y_true))
 
 def nrmse(y_true, y_pred):
-    """Normalized RMSE = RMSE / (max(y) - min(y)) × 100.
-    Makes RMSE comparable across different metric scales (e.g., CPU % vs. bytes/s)."""
     r = float(np.max(y_true) - np.min(y_true))
     if r < 1e-8:
         return float("nan")
@@ -119,25 +104,11 @@ _METRIC_DIRECTION = {
     "mae": False, "rmse": False, "mape": False, "smape": False,
     "r2": True,
     "wape": False, "mase": False, "max_ae": False,
-    "bias": None,   # zero is best
+    "bias": None,                 
     "nrmse": False,
 }
 
-
 class ARRollingForecaster:
-    """
-    AR model with rolling out-of-sample forecasting — a fair comparison to GraniteTTM.
-    ARDetector (used for anomaly detection) fits the model on the ENTIRE series and
-    returns in-sample fittedvalues.  That is data leakage when used as a forecasting
-    baseline: the model "saw" the test points during training, so its errors are
-    unrealistically low.
-    This class mirrors GraniteTTM's rolling-window scheme exactly:
-      - slide a context window of `context_length` points,
-      - fit AR on that window only,
-      - produce an out-of-sample forecast for the next `prediction_length` points,
-      - advance by `step` and repeat.
-    All predictions are strictly out-of-sample.
-    """
 
     def __init__(self, order: int, context_length: int, prediction_length: int,
                  step: int = None, warmup_points: int = None, **kwargs):
@@ -157,7 +128,7 @@ class ARRollingForecaster:
             horizon = pred_end - ctx_end
 
             context = values[start:ctx_end]
-            fallback = float(np.mean(context))  # sensible default if model fails
+            fallback = float(np.mean(context))                                   
 
             try:
                 fit = AutoReg(context, lags=self.order, old_names=False).fit()
@@ -195,7 +166,7 @@ class ARRollingForecaster:
             self._forecast_channel(df[col].to_numpy(dtype=float))
             for col in cols
         ]
-        forecast_matrix = np.vstack(forecasts)  # [C, T]
+        forecast_matrix = np.vstack(forecasts)          
         n = forecast_matrix.shape[1]
 
         return ModelResult(
@@ -205,17 +176,7 @@ class ARRollingForecaster:
             expected_bounds=None,
         )
 
-
 class ChronosRollingForecaster:
-    """
-    Chronos (amazon/chronos-t5-*) rolling out-of-sample forecaster.
-    Mirrors GraniteTTMDetector's rolling-window scheme for a fair comparison:
-      - slide a context window of `context_length` points,
-      - produce a probabilistic forecast for the next `prediction_length` points
-        and use the sample mean as the point prediction,
-      - advance by `step` and repeat.
-    All predictions are strictly out-of-sample.
-    """
 
     def __init__(self, hf_model_path: str = "amazon/chronos-t5-small",
                  context_length: int = 512, prediction_length: int = 64,
@@ -309,17 +270,7 @@ class ChronosRollingForecaster:
             expected_bounds=None,
         )
 
-
 class TimesFMRollingForecaster:
-    """
-    Google TimesFM rolling out-of-sample forecaster.
-    Mirrors the rolling-window scheme of other models:
-      - slide a context window of `context_length` points,
-      - produce a point forecast for the next `prediction_length` steps,
-      - advance by `step` and repeat.
-    All predictions are strictly out-of-sample.
-    Reference: https://github.com/google-research/timesfm
-    """
 
     def __init__(
         self,
@@ -350,14 +301,6 @@ class TimesFMRollingForecaster:
         self._series_processed = 0
 
     def _resolve_device(self):
-        """Return (timesfm_backend, post_load_torch_device_or_None).
-        Upstream timesfm only knows ``cpu`` / ``gpu`` / ``tpu``. For Apple
-        Silicon there's no native MPS path, so we load with ``backend="cpu"``
-        and then move the underlying PyTorch module onto MPS afterwards. We
-        also flip ``tfm.backend = "gpu"`` so timesfm's ``_forecast`` calls
-        ``.cpu()`` before ``.numpy()`` (otherwise an MPS tensor crashes
-        ``.numpy()``).
-        """
         requested = str(self.device).lower()
         has_cuda = bool(_torch and _torch.cuda.is_available())
         has_mps = bool(
@@ -503,17 +446,7 @@ class TimesFMRollingForecaster:
             expected_bounds = None,
         )
 
-
 class PatchTSTRollingForecaster:
-    """
-    PatchTST (ibm-granite/granite-timeseries-patchtst) rolling out-of-sample forecaster.
-    Mirrors the rolling-window scheme of other models:
-      - slide a context window of `context_length` points,
-      - produce a point forecast for the next `prediction_length` steps,
-      - advance by `step` and repeat.
-    All predictions are strictly out-of-sample.
-    Reference: https://huggingface.co/ibm-granite/granite-timeseries-patchtst
-    """
 
     def __init__(
         self,
@@ -704,9 +637,7 @@ def normalize_forecast_array(forecast):
         return forecast
     raise ValueError(f"Unexpected forecast shape: {forecast.shape}")
 
-
 def value_to_color_higher_better(val: float) -> str:
-    """Color for metrics where higher is better (e.g. R2), normalized 0-1."""
     try:
         v = float(val)
     except Exception:
@@ -721,10 +652,7 @@ def value_to_color_higher_better(val: float) -> str:
     else:
         return colored(f"{val:.4g}", "red", attrs=["bold"])
 
-
 def value_to_color_lower_better(val: float, col_min: float, col_max: float) -> str:
-    """Color for metrics where lower is better (MAE, RMSE, MAPE, SMAPE).
-    Normalizes within column so the best (lowest) value is green."""
     try:
         v = float(val)
     except Exception:
@@ -745,7 +673,6 @@ def value_to_color_lower_better(val: float, col_min: float, col_max: float) -> s
         return colored(f"{val:.4g}", "red", attrs=["bold"])
 
 def value_to_color_symmetric(val: float, col_max_abs: float) -> str:
-    """Color for metrics where 0 is best (e.g. bias). Colour by distance from zero."""
     try:
         v = float(val)
     except Exception:
@@ -766,12 +693,6 @@ def print_colored_table(
     title: str,
     higher_is_better: Optional[bool] = False,
 ) -> None:
-    """
-    Print a coloured ASCII table.
-    higher_is_better=True  → green = high value (e.g. R²)
-    higher_is_better=False → green = low value  (e.g. MAE, RMSE)
-    higher_is_better=None  → green = near zero  (e.g. Bias)
-    """
     print(f"\n=== {title} ===")
     all_rows_str = [[str(val) for val in row] for row in df.values]
     idx_width = max(len(str(idx)) for idx in df.index)
@@ -824,12 +745,6 @@ def summarize_metrics(df: pd.DataFrame) -> pd.DataFrame:
     )
 
 def print_time_table(df: pd.DataFrame, title: str) -> None:
-    """Print a plain (uncoloured) table of minute durations.
-    ``print_colored_table`` normalises values for colouring, which is useless
-    for wall-clock minutes. This printer just formats each cell as
-    ``{value:.2f}`` minutes (or ``-`` for NaN/missing) and shows totals as
-    an extra column — matching ``run_anomaly_detection.py`` behaviour.
-    """
     print(f"\n=== {title} ===")
 
     def fmt(v):
@@ -882,17 +797,6 @@ def evaluate_file(
     dataset_name: str = "",
     plot_root: Optional[Path] = None,
 ) -> List[Dict]:
-    """
-    Run one forecaster on one CSV file and return per-series metric rows.
-    Parameters
-    csv_path: path to the dataset CSV
-    detector: forecaster instance
-    model_name: string label used in output rows
-    model_params: dict from models.json5 forecasting_model_params section
-    dataset_name: dataset folder name (stored in output rows for grouping)
-    plot_root: if set, save a per-series two-panel plot to
-    ``<plot_root>/<dataset_name>/<model_name>/<csv_stem>.png``
-    """
     df = read_ts(csv_path)
     value_cols = [c for c in df.columns if c.startswith("value_")]
     ts_df = df[value_cols].copy()
@@ -995,10 +899,6 @@ def _save_forecast_plot(
     dataset_name: str,
     plot_root: Path,
 ) -> None:
-    """Render the same two-panel layout as plot_forecasting.py and save to PNG.
-    Imported lazily so users who don't pass ``--plot_dir`` don't pay the
-    matplotlib import cost.
-    """
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -1236,7 +1136,6 @@ def main():
         print(f"Saved per-series plots to: {plot_root.resolve()}")
     else:
         print("To visualise results run: uv run plot_forecasting.py --save --no_show")
-
 
 if __name__ == "__main__":
     main()

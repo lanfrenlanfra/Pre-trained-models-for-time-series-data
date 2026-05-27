@@ -25,7 +25,6 @@ from .dataset import Dataset
 from .loggers import BaseLogger
 from .utils import generate_detection_windows
 
-
 @dataclass
 class ProcessWorkerArgs:
     idx: int
@@ -35,7 +34,6 @@ class ProcessWorkerArgs:
     history_window: timedelta
     all_at_once: bool
     auto_threshold: bool
-
 
 class AnomalyDetectionBenchmark:
     def __init__(self, detector_configs: Dict, logger: Optional[BaseLogger] = None):
@@ -175,8 +173,6 @@ class AnomalyDetectionBenchmark:
             index=ground_truth_df.index,
         )
 
-        anomalies_percentage = anomalies["ground_truth"].sum() / len(anomalies) * 100
-
         if all_at_once:
             detection_result = detector.detect(values_df)
             anomalies["predicted"] = detection_result.is_anomaly
@@ -204,41 +200,6 @@ class AnomalyDetectionBenchmark:
 
     @staticmethod
     def _calculate_single_metrics(anomalies: pd.DataFrame) -> Dict:
-        """Compute per-series metrics on CV and EVT thresholds only.
-
-        Historically precision/recall/F1 were computed from
-        ``anomalies["predicted"]`` — i.e. each detector's *fixed* internal
-        threshold (e.g. ``threshold=3.0`` in MoiraiDetector). That value was
-        hand-picked with data-leak knowledge of typical anomaly magnitudes,
-        so the resulting metrics weren't comparable across models.
-
-        The benchmark now ignores ``predicted`` entirely and reports
-        precision/recall/F1/PA-F1 against two transparent threshold rules:
-
-        * ``_cv``  — supervised, walk-forward CV threshold (uses labels but
-                     no future leakage from the eval window).
-        * ``_evt`` — Peaks-over-Threshold + GPD fit. ``p`` (the tail mass we
-                     expect anomalies to occupy) is now **adaptive**: it is
-                     set to the per-series anomaly rate when at least one
-                     positive exists. Previously a fixed ``p=0.01`` was used,
-                     which mechanically capped recall at ~1% of points on
-                     datasets where the true anomaly rate is 5–20 % (NAB,
-                     TODS) — e.g. on NAB even an oracle detector was forced
-                     down to ``f1_evt ≈ 0.05`` while ``pa_f1_evt`` stayed
-                     near 0.95 (PA only needs one hit per span). EVT is no
-                     longer "fully unsupervised" — it's calibrated to the
-                     observed positive rate, which is the right thing to do
-                     for a benchmark.
-
-        NaN handling: positions where the detector produced no score
-        (warmup region, uncovered tail) carry ``np.nan`` in
-        ``anomalies["score"]``. All metric helpers below drop those rows
-        from both score and ground truth, so unscored points don't get
-        silently counted as "model predicted no anomaly".
-
-        ``f1_best`` (oracle scan over all thresholds) is kept as a
-        theoretical upper-bound row in the summary; everything else is honest.
-        """
         ground_truth = anomalies["ground_truth"]
         score = anomalies["score"]
 

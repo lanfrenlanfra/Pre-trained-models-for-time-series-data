@@ -2,7 +2,6 @@ import glob
 import pandas as pd
 from pathlib import Path
 
-
 class Dataset:
     def __init__(self, path: str | Path):
         if isinstance(path, str):

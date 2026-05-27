@@ -16,7 +16,6 @@ COLOR_ANOMALY = "#DC2626"
 COLOR_ANOMALY_BG = "#FEE2E2"
 
 def parse_timestamp(ts_series: pd.Series) -> pd.Series:
-    """Convert unix-ms, unix-s, or datetime strings to pandas Timestamps."""
     sample = ts_series.iloc[0]
     try:
         val = float(sample)
@@ -28,7 +27,6 @@ def parse_timestamp(ts_series: pd.Series) -> pd.Series:
         return pd.to_datetime(ts_series)
 
 def find_anomaly_spans(is_anomaly: np.ndarray, times: pd.Series):
-    """Return list of (start_time, end_time) for contiguous anomaly runs."""
     spans = []
     in_span = False
     start = None
@@ -44,7 +42,6 @@ def find_anomaly_spans(is_anomaly: np.ndarray, times: pd.Series):
     return spans
 
 def format_yaxis(ax):
-    """Force plain integer/float notation on Y axis (no scientific notation)."""
     ax.yaxis.set_major_formatter(ticker.FuncFormatter(
         lambda x, _: f"{x:,.0f}" if abs(x) >= 1 else f"{x:.4g}"
     ))
@@ -97,7 +94,6 @@ def collect_csv_files(datasets: list[str]) -> list[Path]:
         print(f"{ds}: {len(found)} files")
         files.extend(found)
     return files
-
 
 def main():
     parser = argparse.ArgumentParser(description="Plot benchmark time series")
@@ -174,7 +170,6 @@ def main():
             plt.close(fig)
 
     print("\nDone.")
-
 
 if __name__ == "__main__":
     main()

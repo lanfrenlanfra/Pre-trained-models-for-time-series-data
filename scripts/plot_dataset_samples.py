@@ -11,7 +11,6 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from matplotlib.lines import Line2D
 
-
 DATASETS = ["AIOPS", "TODS", "WSD", "Yahoo"]
 
 WINDOW_POINTS = {
@@ -21,10 +20,7 @@ WINDOW_POINTS = {
     "Yahoo": 1500,
 }
 
-
 def pick_representative_file(data_root: Path, dataset: str) -> Path:
-    """Return a CSV file that has at least one anomaly and a typical
-    anomaly count for the dataset (median over the dataset)."""
     files = sorted((data_root / dataset).glob("*.csv"))
     counts = []
     for f in files:
@@ -35,7 +31,6 @@ def pick_representative_file(data_root: Path, dataset: str) -> Path:
         return files[0]
     with_anom.sort(key=lambda x: x[1])
     return with_anom[len(with_anom) // 2][0]
-
 
 def load_fragment(path: Path, window: int) -> pd.DataFrame:
     df = pd.read_csv(path)
@@ -50,7 +45,6 @@ def load_fragment(path: Path, window: int) -> pd.DataFrame:
         start = max(0, center - window // 2)
         start = min(start, len(df) - window)
     return df.iloc[start:start + window].reset_index(drop=True)
-
 
 def plot_one(ax, df: pd.DataFrame, title: str) -> None:
     ax.plot(df["timestamp"], df["value_0"], lw=0.7, color="#1f4e79")
@@ -81,7 +75,6 @@ def plot_one(ax, df: pd.DataFrame, title: str) -> None:
     ax.tick_params(axis="x", labelsize=8)
     ax.tick_params(axis="y", labelsize=8)
     ax.grid(alpha=0.3)
-
 
 def main() -> None:
     ap = argparse.ArgumentParser()
@@ -126,7 +119,6 @@ def main() -> None:
         dst = args.copy_to / out_path.name
         shutil.copy2(out_path, dst)
         print(f"copied to: {dst}")
-
 
 if __name__ == "__main__":
     main()

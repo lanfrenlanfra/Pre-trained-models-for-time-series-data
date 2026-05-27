@@ -26,7 +26,6 @@ C_GT_BG = "#FEF9C3"
 C_ZERO = "#6B7280"
 
 def plain_number_formatter(ax_obj, which: str = "y") -> None:
-    """No scientific notation; plain integers for large numbers."""
     fmt = ticker.FuncFormatter(
         lambda x, _: f"{x:,.0f}" if abs(x) >= 1000 else f"{x:.4g}"
     )
@@ -35,9 +34,7 @@ def plain_number_formatter(ax_obj, which: str = "y") -> None:
     else:
         ax_obj.xaxis.set_major_formatter(fmt)
 
-
 def find_spans(flags: np.ndarray, times: pd.Index):
-    """Yield (t_start, t_end) for each contiguous True run."""
     flags = np.asarray(flags, dtype=bool)
     diffs = np.diff(np.concatenate([[False], flags, [False]]).astype(int))
     starts = np.where(diffs == 1)[0]
@@ -54,22 +51,12 @@ def parse_timestamp(ts_series: pd.Series) -> pd.Series:
     except (ValueError, TypeError):
         return pd.to_datetime(ts_series)
 
-
 def load_csv(csv_path: Path) -> pd.DataFrame:
     df = pd.read_csv(csv_path)
     df.index = parse_timestamp(df["timestamp"])
     return df
 
 def run_forecast(csv_path: Path, fc_config: dict, warmup_points: int):
-    """
-    Instantiate the forecaster described in *fc_config* and run it on one file.
-    Returns
-    times: pd.DatetimeIndex
-    y_true: np.ndarray  [T]
-    y_pred: np.ndarray  [T]  (NaN in warmup / gap positions)
-    is_anomaly: np.ndarray | None  [T]
-    warmup_points: int
-    """
     from run_forecasting import build_detector, normalize_forecast_array
     from anomaly_detection_forecasting.core import TimeSeriesWrapper
 
@@ -88,9 +75,9 @@ def run_forecast(csv_path: Path, fc_config: dict, warmup_points: int):
 
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore")
-        result = detector(time_series, file_label=csv_path.name) \
-            if hasattr(detector, "__call__") and "file_label" in \
-               __import__("inspect").signature(detector.__call__).parameters \
+        result = detector(time_series, file_label=csv_path.name)\
+            if hasattr(detector, "__call__") and "file_label" in\
+               __import__("inspect").signature(detector.__call__).parameters\
             else detector(time_series)
 
     forecast = normalize_forecast_array(result.expected_value)
@@ -100,11 +87,6 @@ def run_forecast(csv_path: Path, fc_config: dict, warmup_points: int):
     return df.index, y_true, y_pred, is_anomaly, warmup_points
 
 def estimate_ci(y_true: np.ndarray, y_pred: np.ndarray):
-    """
-    Return (residuals, sigma, ci95_lo, ci95_hi, ci80_lo, ci80_hi).
-    σ is estimated from the global residual distribution with the top 10 %
-    of absolute errors trimmed (robust to anomalous spikes).
-    """
     valid = ~np.isnan(y_pred)
     if not valid.any():
         nan = np.full(len(y_true), np.nan)
@@ -132,9 +114,7 @@ def _g(v): return f"{v:.3g}" if np.isfinite(v) else "n/a"
 def _gp(v): return f"{v:.1f}%" if np.isfinite(v) else "n/a"
 def _gf(v): return f"{v:.3f}" if np.isfinite(v) else "n/a"
 
-
 def quick_metrics(y_true: np.ndarray, y_pred: np.ndarray, warmup: int) -> dict:
-    """Compute summary metrics on the post-warmup, non-NaN portion."""
     yt = y_true[warmup:]
     yp = y_pred[warmup:]
     mask = ~np.isnan(yp)
@@ -152,7 +132,7 @@ def quick_metrics(y_true: np.ndarray, y_pred: np.ndarray, warmup: int) -> dict:
     r2_v = (1.0 - ss_res / ss_tot) if ss_tot > 0 else float("nan")
     wape_v = float(np.sum(np.abs(yt - yp)) / max(np.sum(np.abs(yt)), 1e-8) * 100.0)
     naive = np.abs(np.diff(yt))
-    mase_v = (mae_v / float(np.mean(naive))) if len(naive) and np.mean(naive) > 1e-8 \
+    mase_v = (mae_v / float(np.mean(naive))) if len(naive) and np.mean(naive) > 1e-8\
               else float("nan")
     max_ae_v = float(np.max(np.abs(yt - yp)))
     bias_v = float(np.mean(yp - yt))
@@ -174,11 +154,6 @@ def plot_one(
     ax_ts: plt.Axes,
     ax_res: plt.Axes,
 ) -> None:
-    """
-    Fill two pre-created Axes:
-      ax_ts  — time series panel (actual + forecast + CI bands)
-      ax_res — residual panel
-    """
     T = len(y_true)
 
     residuals, sigma, ci95_lo, ci95_hi, ci80_lo, ci80_hi = estimate_ci(y_true, y_pred)
@@ -396,7 +371,6 @@ def main():
                 plt.close(fig)
 
     print("\nDone.")
-
 
 if __name__ == "__main__":
     main()

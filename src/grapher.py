@@ -6,7 +6,6 @@ import pandas as pd
 import plotly.graph_objects as go
 import seaborn as sns
 
-
 def plot_time_series(timestamp, value, labeling_gt, labeling_predicted, title='', backend='plotly'):
     if backend == 'matplotlib':
         plot_time_series_matplotlib(timestamp, value, labeling_gt, labeling_predicted, title)
@@ -17,7 +16,6 @@ def plot_time_series(timestamp, value, labeling_gt, labeling_predicted, title=''
         pass
     else:
         RuntimeError(f'There is no backend {backend}')
-
 
 def plot_time_series_matplotlib(
     timestamp: Iterable,
@@ -44,7 +42,7 @@ def plot_time_series_matplotlib(
     ax1.set_ylabel('value')
 
     ground_truth_df = pd.DataFrame({'value': labeling_gt}, index=timestamp)
-    
+
     labeling_gt = np.array(labeling_gt)
     change_points = np.where(np.diff(labeling_gt))[0]
     if labeling_gt[0]:
@@ -89,7 +87,7 @@ def plot_time_series_matplotlib(
 
     if save_path:
         plt.savefig(save_path, bbox_inches='tight', pad_inches=0.1)
-    
+
     if show:
         plt.show()
 
@@ -97,21 +95,7 @@ def plot_time_series_matplotlib(
     plt.cla()
     plt.clf()
 
-
 def plot_time_series_plotly(timestamp, value, labeling_gt, labeling_predicted=None, title='') -> go.Figure:
-    """
-    Plot time series with ground truth anomaly segments and predicted anomalies.
-
-    Args:
-        timestamp: array-like of datetime values
-        value: array-like of values
-        labeling_gt: array-like of boolean/integer values indicating ground truth anomalies
-        labeling_predicted: array-like of boolean/integer values indicating predicted anomalies
-        title: string for plot title
-
-    Returns:
-        fig: plotly figure object
-    """
     fig = go.Figure()
 
     fig.add_trace(go.Scatter(x=timestamp, y=value, mode='lines', name='Time Series', line=dict(color='blue')))
@@ -149,19 +133,7 @@ def plot_time_series_plotly(timestamp, value, labeling_gt, labeling_predicted=No
 
     return fig
 
-
 def add_anomaly_segments(fig: go.Figure, timestamps: Iterable, is_anomaly: Iterable):
-    """
-    Add anomaly segments to plotly figure.
-
-    Args:
-        fig: plotly figure object
-        timestamps: array-like of datetime values
-        is_anomaly: array-like of boolean/integer values indicating anomaly
-
-    Returns:
-        fig: modified plotly figure object
-    """
     timestamps = np.array(timestamps)
     is_anomaly = np.array(is_anomaly)
 

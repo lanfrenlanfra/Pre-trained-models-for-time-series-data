@@ -40,7 +40,6 @@ def load_csv(csv_path: Path) -> pd.DataFrame:
     return df
 
 def run_detection(csv_path: Path, ad_config: dict):
-    """Run AnomalyDetectionSystem on one file; return (df_result, detection_result)."""
     from anomaly_detection_forecasting import AnomalyDetectionSystem
 
     df = load_csv(csv_path)
@@ -81,7 +80,6 @@ def run_detection(csv_path: Path, ad_config: dict):
     return out
 
 def plain_number_formatter(ax_obj, which="y"):
-    """No scientific notation; plain integers for large numbers."""
     fmt = ticker.FuncFormatter(
         lambda x, _: f"{x:,.0f}" if abs(x) >= 1 else f"{x:.4g}"
     )
@@ -90,9 +88,7 @@ def plain_number_formatter(ax_obj, which="y"):
     else:
         ax_obj.xaxis.set_major_formatter(fmt)
 
-
 def find_spans(flags: np.ndarray, times: pd.Index):
-    """Yield (t_start, t_end) for each contiguous True run."""
     flags = np.asarray(flags, dtype=bool)
     diffs = np.diff(np.concatenate([[False], flags, [False]]).astype(int))
     starts = np.where(diffs == 1)[0]
@@ -101,12 +97,6 @@ def find_spans(flags: np.ndarray, times: pd.Index):
         yield times[s], times[min(e, len(times) - 1)]
 
 def plot_one(df: pd.DataFrame, threshold: float, title: str, ax_ts: plt.Axes, ax_sc: plt.Axes):
-    """
-    Two-panel figure:
-      ax_ts — top: signal + TP / FN / FP scatter, x-axis labelled
-      ax_sc — bottom: anomaly score curve + threshold line, x-axis labelled
-    Ground-truth anomaly regions shown as yellow background bands in both panels.
-    """
     times = df.index
     v = df["value"].to_numpy(dtype=float)
     gt = df["ground_truth"].to_numpy(dtype=int)
@@ -297,7 +287,6 @@ def main():
                 plt.close(fig)
 
     print("\nDone.")
-
 
 if __name__ == "__main__":
     main()

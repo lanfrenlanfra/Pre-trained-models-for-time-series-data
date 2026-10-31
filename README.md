@@ -2,6 +2,7 @@
 
 Сравнение предобученных моделей временных рядов для задач **обнаружения аномалий** и **прогнозирования**. Сравниваются: AR (авторегрессия), GraniteTTM, Chronos, TimesFM, PatchTST.   
 Презентация проекта https://drive.google.com/file/d/1lIy3p4QpKhjhAWakW5_KKHjKa9VPGliv/view?usp=sharing
+
 ---
 
 ## Установка окружения

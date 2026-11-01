@@ -3,7 +3,6 @@
 # Pre-trained Models for Time Series Data
 
 A comparison of pre-trained time series models for **anomaly detection** and **forecasting**. Compared models: AR (autoregression), GraniteTTM, Chronos, TimesFM, PatchTST.   
-Project presentation: https://drive.google.com/file/d/1lIy3p4QpKhjhAWakW5_KKHjKa9VPGliv/view?usp=sharing
 
 ---
 

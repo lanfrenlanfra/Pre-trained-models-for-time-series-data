@@ -1,64 +1,66 @@
-# Скрипты для раздела «Данные» ВКР
+**English** | [Русский](README.ru.md)
 
-## 1. Построение примеров фрагментов рядов (Рисунок 2.1 в coursework.tex)
+# Scripts for the "Data" section of the thesis
 
-Выбирает по одному репрезентативному файлу из каждого датасета
-(AIOPS, TODS, WSD, Yahoo), показывает непрерывный фрагмент вокруг
-первой аномалии, отмечает размеченные аномалии красным цветом и
-сохраняет результат в один PNG.
+## 1. Building example series fragments
+
+Picks one representative file from each dataset
+(AIOPS, TODS, WSD, Yahoo), shows a continuous fragment around the
+first anomaly, marks the labeled anomalies in red, and
+saves the result as a single PNG.
 
 ```bash
-# из корня репозитория
+# from the repository root
 python scripts/plot_dataset_samples.py \
     --data-root data \
     --out-dir figures \
-    --copy-to "/Users/alinashekhovtsova/Downloads/Diploma/graphics"
+    --copy-to "path/to/Pre-trained-models-for-time-series-data/graphics"
 ```
 
-Что получается на выходе:
+Output:
 
-- `figures/dataset_examples.png` — локальная копия в репозитории;
-- `Diploma/graphics/dataset_examples.png` — копия в папке с
-  `coursework.tex`, которую `pdflatex` подхватывает автоматически
-  через `\graphicspath{{graphics/}}`, так что
-  `\includegraphics{dataset_examples.png}` отрабатывает без
-  дополнительных настроек.
+- `figures/dataset_examples.png` — a local copy in the repository;
+- `Pre-trained-models-for-time-series-data/graphics/dataset_examples.png` — a copy in the folder with
+  `coursework.tex`, which `pdflatex` picks up automatically
+  via `\graphicspath{{graphics/}}`, so
+  `\includegraphics{dataset_examples.png}` works without
+  any extra setup.
 
-Если хочется задать конкретные примеры файлов:
+To specify particular example files:
 
 ```bash
 python scripts/plot_dataset_samples.py \
     --files "AIOPS=data/AIOPS/05f10d3a-239c-3bef-9bdc-a2feeb0037aa.csv,TODS=data/TODS/0.csv"
 ```
 
-## 2. Пересчет статистик по датасетам (для текста и Таблицы 2.1)
+## 2. Recomputing dataset statistics (for the text and Table 2.1)
 
-Печатает по каждому датасету количество рядов, минимальную,
-медианную и максимальную длину, шаг дискретизации, общее число
-точек, глобальную долю аномалий и количество рядов, в которых
-есть хотя бы одна размеченная аномалия. Дополнительно выводит
-разбиение по подколлекциям Yahoo (A3, A4, real\_, synthetic\_).
+For each dataset, prints the number of series, the minimum,
+median and maximum length, the sampling step, the total number
+of points, the global share of anomalies, and the number of series that
+contain at least one labeled anomaly. It also prints
+a breakdown by Yahoo sub-collections (A3, A4, real\_, synthetic\_).
 
 ```bash
 python scripts/dataset_stats.py --data-root data
 ```
 
-Если набор данных меняется (добавление или удаление файлов в
-`data/`), достаточно повторно запустить этот скрипт и перенести
-новые числа в Таблицу 2.1 в `coursework.tex`. Текущие значения в
-работе соответствуют следующему срезу данных:
+If the data changes (files added to or removed from
+`data/`), just rerun this script and copy the
+new numbers into Table 2.1 in `coursework.tex`. The current values in
+the thesis correspond to the following data snapshot:
 
-| Датасет | Кол-во рядов | Длина (медиана) | Шаг   | Всего точек | Аномалий, % |
-|---------|-------------:|----------------:|-------|------------:|------------:|
-| AIOPS   |           29 |         263 590 | 1 мин |     6,15 млн |        2,27 |
-| TODS    |           15 |          10 000 | 5 мин |     0,15 млн |        5,85 |
-| WSD     |          210 |          36 471 | 1 мин |     7,66 млн |        1,60 |
-| Yahoo   |          367 |           1 680 | 1 час |     0,57 млн |        0,68 |
+| Dataset | Number of series | Length (median) | Step   | Total points | Anomalies, % |
+|---------|-----------------:|----------------:|--------|-------------:|-------------:|
+| AIOPS   |               29 |         263,590 | 1 min  |       6.15 M |         2.27 |
+| TODS    |               15 |          10,000 | 5 min  |       0.15 M |         5.85 |
+| WSD     |              210 |          36,471 | 1 min  |       7.66 M |         1.60 |
+| Yahoo   |              367 |           1,680 | 1 hour |       0.57 M |         0.68 |
 
-## Зависимости
+## Dependencies
 
 ```bash
 pip install pandas numpy matplotlib
 ```
 
-(Все три пакета уже установлены в проектное виртуальное окружение `.venv`.)
+(All three packages are already installed in the project's `.venv` virtual environment.)
